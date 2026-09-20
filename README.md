@@ -149,7 +149,8 @@ equivalent to:
 fmt.Printf("\tcase %v:\n\t\treturn \"%v\"\n", name, name)
 ```
 
-The `-emit` flag chooses that function. It defaults to `fmt.Printf`.  You can use
+The `-emit` flag chooses that function. It defaults to `fmt.Printf`. and qudy
+adds the `fmt` import to the generator when the template lacks it. You can use
 an existing generator's method to write to a buffer or file. qudy combines a
 **run** of consecutive output lines into one call, uses `%v` for inserted values,
 and escapes literal percent signs, which is why the template can say `%d`.

@@ -63,6 +63,9 @@ func Compile(filename string, src []byte, emit string) ([]byte, error) {
 			}
 		}
 		gen = append(gen, t.rewriteBuiltinCalls(i+1, line))
+		if i+1 == t.packageLine && t.needsFmt(emit) {
+			gen = append(gen, `import "fmt"`)
+		}
 		if bodies[i+1] {
 			gen = append(gen, gensymDecl)
 		}

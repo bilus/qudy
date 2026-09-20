@@ -286,10 +286,8 @@ func TestCompileKeepsAGensymApartFromTheNamesOfTheTemplate(t *testing.T) {
 	}
 }
 
-// both writes a variable of the template beside the gensym of the same name.
+// both writes a template variable beside the gensym of its name, without importing fmt.
 const both = `package main
-
-import "fmt"
 
 func main() {
 	err := "theirs"
@@ -316,6 +314,32 @@ func TestAGensymAndAVariableOfTheSameNameBothWork(t *testing.T) {
 	}
 	if want := "theirs and err_qd1\n"; string(out) != want {
 		t.Errorf("the generator wrote %q, want %q", out, want)
+	}
+}
+
+func TestCompileImportsFmtForItsEmitCalls(t *testing.T) {
+	type testCase struct {
+		description string
+		template    string
+		emit        string
+		imports     int
+	}
+	for _, c := range []testCase{
+		{"a template without the import", template("//`return nil"), "fmt.Printf", 1},
+		{"a template with the import", "package p\n\nimport \"fmt\"\n\nfunc f() {\n\t//`return nil\n}\n", "fmt.Printf", 1},
+		{"a template with the import under another name", "package p\n\nimport f \"fmt\"\n\nfunc g() {\n\tf.Println()\n\t//`return nil\n}\n", "fmt.Printf", 2},
+		{"an emit function outside fmt", template("//`return nil"), "g.generate", 0},
+		{"a template without an output line", template("x := 1", "_ = x"), "fmt.Printf", 0},
+	} {
+		t.Run(c.description, func(t *testing.T) {
+			gen, err := qudy.Compile("test.go", []byte(c.template), c.emit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := strings.Count(string(gen), `"fmt"`); n != c.imports {
+				t.Errorf("the generator imports fmt %d times, want %d:\n%s", n, c.imports, gen)
+			}
+		})
 	}
 }
 

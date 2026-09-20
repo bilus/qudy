@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -17,6 +18,7 @@ type template struct {
 	outputLines  map[int]string
 	blocks       []span
 	funcBodies   []span
+	importsFmt   bool
 	declared     map[string]bool
 	ownGensym    map[span]bool
 	builtinCalls []builtinCall
@@ -36,6 +38,7 @@ func newTemplate(filename string, src []byte) (*template, error) {
 		outputLines:  map[int]string{},
 		blocks:       blockSpans(fset, file),
 		funcBodies:   funcBodySpans(fset, file),
+		importsFmt:   importsPackage(file, "fmt"),
 		declared:     declaredNames(file),
 		ownGensym:    ownGensymBodies(fset, file),
 		builtinCalls: findBuiltinCalls(fset, file),
@@ -330,4 +333,19 @@ func hasName(idents []*ast.Ident, name string) bool {
 		}
 	}
 	return false
+}
+
+// importsPackage reports whether the file imports a standard package under its own name.
+func importsPackage(file *ast.File, path string) bool {
+	for _, spec := range file.Imports {
+		if spec.Path.Value == strconv.Quote(path) && (spec.Name == nil || spec.Name.Name == path) {
+			return true
+		}
+	}
+	return false
+}
+
+// needsFmt reports whether the emit calls use fmt without an import in the template.
+func (t *template) needsFmt(emit string) bool {
+	return strings.HasPrefix(emit, "fmt.") && len(t.outputLines) > 0 && !t.importsFmt
 }
