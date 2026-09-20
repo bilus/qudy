@@ -39,6 +39,8 @@ that generator to write the final source.** You supply the data and the logic
 that reads it. The generator contains ordinary Go calls and needs no qudy
 runtime dependency.
 
+![Three nesting dolls show qudy producing a stringer generator, which produces colors_gen.go.](docs/matryoshka.svg)
+
 The example below takes an enum's constant names as arguments. After that, read
 about interpolation, integration with existing generators, and writing several
 files.
