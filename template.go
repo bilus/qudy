@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"slices"
 	"strings"
 )
 
@@ -17,8 +18,8 @@ type template struct {
 	blocks       []span
 	funcBodies   []span
 	declared     map[string]bool
+	ownGensym    map[span]bool
 	builtinCalls []builtinCall
-	ownGensyms   ownGensyms
 }
 
 // newTemplate parses a template and rejects misplaced output lines and GENSYM calls.
@@ -36,8 +37,11 @@ func newTemplate(filename string, src []byte) (*template, error) {
 		blocks:       blockSpans(fset, file),
 		funcBodies:   funcBodySpans(fset, file),
 		declared:     declaredNames(file),
+		ownGensym:    ownGensymBodies(fset, file),
 		builtinCalls: findBuiltinCalls(fset, file),
-		ownGensyms:   findOwnGensyms(fset, file),
+	}
+	if name, ok := reservedName(t.declared); ok {
+		return nil, fmt.Errorf("%s: the template declares %s, and qudy reserves names that end in %s", filename, name, gensymSuffix)
 	}
 	if t.declared[gensymBuiltin] {
 		return nil, fmt.Errorf("%s: the template declares %s, which is a built-in function", filename, gensymBuiltin)
@@ -188,18 +192,33 @@ func blockSpans(fset *token.FileSet, file *ast.File) []span {
 	return spans
 }
 
-// declaredNames collects every name with a declaration in the template.
+// declaredNames collects every name that the template declares, except methods.
 func declaredNames(file *ast.File) map[string]bool {
 	names := map[string]bool{}
 	add := func(idents ...*ast.Ident) {
 		for _, id := range idents {
-			if id != nil {
-				names[id.Name] = true
+			names[id.Name] = true
+		}
+	}
+	fields := func(lists ...*ast.FieldList) {
+		for _, list := range lists {
+			if list == nil {
+				continue
+			}
+			for _, field := range list.List {
+				add(field.Names...)
 			}
 		}
 	}
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch n := n.(type) {
+		case *ast.FuncDecl:
+			if n.Recv == nil {
+				add(n.Name)
+			}
+			fields(n.Recv, n.Type.Params, n.Type.Results)
+		case *ast.FuncLit:
+			fields(n.Type.Params, n.Type.Results)
 		case *ast.AssignStmt:
 			if n.Tok == token.DEFINE {
 				for _, lhs := range n.Lhs {
@@ -210,102 +229,101 @@ func declaredNames(file *ast.File) map[string]bool {
 			}
 		case *ast.ValueSpec:
 			add(n.Names...)
-		case *ast.Field:
-			add(n.Names...)
-		case *ast.RangeStmt:
-			if id, ok := n.Key.(*ast.Ident); ok {
-				add(id)
-			}
-			if id, ok := n.Value.(*ast.Ident); ok {
-				add(id)
-			}
-		case *ast.FuncDecl:
-			add(n.Name)
 		case *ast.TypeSpec:
 			add(n.Name)
-		case *ast.LabeledStmt:
-			add(n.Label)
 		}
 		return true
 	})
 	return names
 }
 
-// ownGensyms is where a template declares its own symbol generator.
-type ownGensyms struct {
-	packageLevel bool
-	lines        []int
-}
-
-// newOwnGensyms returns the declarations at package level and on the given lines.
-func newOwnGensyms(packageLevel bool, lines []int) ownGensyms {
-	return ownGensyms{packageLevel: packageLevel, lines: lines}
-}
-
-// declaredIn reports whether the template declares a symbol generator for a function body.
-func (o ownGensyms) declaredIn(body span) bool {
-	if o.packageLevel {
-		return true
+// reservedName returns a declared name that ends in the suffix of qudy's own names.
+func reservedName(declared map[string]bool) (string, bool) {
+	var reserved []string
+	for name := range declared {
+		if strings.HasSuffix(name, gensymSuffix) {
+			reserved = append(reserved, name)
+		}
 	}
-	for _, line := range o.lines {
-		if body.from <= line && line <= body.to {
+	if len(reserved) == 0 {
+		return "", false
+	}
+	return slices.Min(reserved), true
+}
+
+// ownGensymBodies returns the function bodies for which the template declares qudyGensym.
+func ownGensymBodies(fset *token.FileSet, file *ast.File) map[span]bool {
+	own := map[span]bool{}
+	everywhere := declaresInPackage(file, gensymVariable)
+	ast.Inspect(file, func(n ast.Node) bool {
+		var typ *ast.FuncType
+		var body *ast.BlockStmt
+		switch n := n.(type) {
+		case *ast.FuncDecl:
+			typ, body = n.Type, n.Body
+		case *ast.FuncLit:
+			typ, body = n.Type, n.Body
+		}
+		if body != nil && (everywhere || declaresInFunc(typ, body, gensymVariable)) {
+			own[span{fset.Position(body.Lbrace).Line, fset.Position(body.Rbrace).Line}] = true
+		}
+		return true
+	})
+	return own
+}
+
+// declaresInPackage reports whether the package declares a function or a variable with a name.
+func declaresInPackage(file *ast.File, name string) bool {
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if d.Recv == nil && d.Name.Name == name {
+				return true
+			}
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				if vs, ok := spec.(*ast.ValueSpec); ok && hasName(vs.Names, name) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// declaresInFunc reports whether a name is a parameter or a local of a function.
+func declaresInFunc(typ *ast.FuncType, body *ast.BlockStmt, name string) bool {
+	found := hasParam(typ, name)
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			found = found || hasParam(n.Type, name)
+		case *ast.AssignStmt:
+			for _, lhs := range n.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok && n.Tok == token.DEFINE && id.Name == name {
+					found = true
+				}
+			}
+		case *ast.ValueSpec:
+			found = found || hasName(n.Names, name)
+		}
+		return !found
+	})
+	return found
+}
+
+// hasParam reports whether a function type has a parameter with a name.
+func hasParam(typ *ast.FuncType, name string) bool {
+	for _, field := range typ.Params.List {
+		if hasName(field.Names, name) {
 			return true
 		}
 	}
 	return false
 }
 
-// findOwnGensyms finds every declaration of the symbol generator in the template.
-func findOwnGensyms(fset *token.FileSet, file *ast.File) ownGensyms {
-	packageLevel := false
-	for _, decl := range file.Decls {
-		switch d := decl.(type) {
-		case *ast.FuncDecl:
-			packageLevel = packageLevel || d.Name.Name == gensymVariable
-		case *ast.GenDecl:
-			for _, spec := range d.Specs {
-				if vs, ok := spec.(*ast.ValueSpec); ok && names(vs.Names, gensymVariable) {
-					packageLevel = true
-				}
-			}
-		}
-	}
-	var lines []int
-	add := func(pos token.Pos) { lines = append(lines, fset.Position(pos).Line) }
-	param := func(typ *ast.FuncType, body *ast.BlockStmt) {
-		if body == nil {
-			return
-		}
-		for _, field := range typ.Params.List {
-			if names(field.Names, gensymVariable) {
-				add(body.Lbrace)
-			}
-		}
-	}
-	ast.Inspect(file, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.FuncDecl:
-			param(n.Type, n.Body)
-		case *ast.FuncLit:
-			param(n.Type, n.Body)
-		case *ast.AssignStmt:
-			for _, lhs := range n.Lhs {
-				if id, ok := lhs.(*ast.Ident); ok && n.Tok == token.DEFINE && id.Name == gensymVariable {
-					add(n.Pos())
-				}
-			}
-		case *ast.ValueSpec:
-			if names(n.Names, gensymVariable) {
-				add(n.Pos())
-			}
-		}
-		return true
-	})
-	return newOwnGensyms(packageLevel, lines)
-}
-
-// names reports whether a list of identifiers holds a name.
-func names(idents []*ast.Ident, name string) bool {
+// hasName reports whether a list of identifiers holds a name.
+func hasName(idents []*ast.Ident, name string) bool {
 	for _, id := range idents {
 		if id.Name == name {
 			return true

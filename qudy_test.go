@@ -103,22 +103,22 @@ func TestCompileWritesTheEmitCalls(t *testing.T) {
 		{
 			"the compiler declares a gensym before its run",
 			template("//`~x := errName#"),
-			"errName := qudyGensym(\"errName\")\n\tg.generate(`%v := %v\n`, x, errName)",
+			"errName_qd := qudyGensym(\"errName\")\n\tg.generate(`%v := %v\n`, x, errName_qd)",
 		},
 		{
 			"a second run in the same block reuses the gensym",
 			template("//`a := errName#", "x := 1", "//`b := errName#"),
-			"errName := qudyGensym(\"errName\")\n\tg.generate(`a := %v\n`, errName)\n\tx := 1\n\tg.generate(`b := %v\n`, errName)",
+			"errName_qd := qudyGensym(\"errName\")\n\tg.generate(`a := %v\n`, errName_qd)\n\tx := 1\n\tg.generate(`b := %v\n`, errName_qd)",
 		},
 		{
 			"a run in a loop declares the gensym inside the loop",
 			template("for range xs {", "//`a := errName#", "}"),
-			"for range xs {\n\t\terrName := qudyGensym(\"errName\")\n\t\tg.generate(`a := %v\n`, errName)\n\t}",
+			"for range xs {\n\t\terrName_qd := qudyGensym(\"errName\")\n\t\tg.generate(`a := %v\n`, errName_qd)\n\t}",
 		},
 		{
 			"a sibling block declares its own gensym",
 			template("if x {", "//`a := errName#", "}", "if y {", "//`b := errName#", "}"),
-			"if y {\n\t\terrName := qudyGensym(\"errName\")\n\t\tg.generate(`b := %v\n`, errName)\n\t}",
+			"if y {\n\t\terrName_qd := qudyGensym(\"errName\")\n\t\tg.generate(`b := %v\n`, errName_qd)\n\t}",
 		},
 		{
 			"a line inside a block comment is not an output line",
@@ -213,7 +213,7 @@ func TestCompileUsesTheSymbolGeneratorOfTheTemplate(t *testing.T) {
 			if strings.Contains(gen, builtin) {
 				t.Errorf("the compiler declared its own symbol generator:\n%s", gen)
 			}
-			if want := `errName := qudyGensym("errName")`; !strings.Contains(gen, want) {
+			if want := `errName_qd := qudyGensym("errName")`; !strings.Contains(gen, want) {
 				t.Errorf("compiled to\n%s\nwant it to hold\n%s", gen, want)
 			}
 		})
@@ -262,6 +262,63 @@ func TestCompileDropsTheGenerateDirectiveOfTheTemplate(t *testing.T) {
 	}
 }
 
+func TestCompileKeepsAGensymApartFromTheNamesOfTheTemplate(t *testing.T) {
+	type testCase struct {
+		description string
+		template    string
+	}
+	use := "func f() {\n\t//`x := err#\n}\n"
+	for _, c := range []testCase{
+		{"a variable of the same function", "package p\n\nfunc f() {\n\terr := 1\n\t_ = err\n\t//`x := err#\n}\n"},
+		{"a parameter of the same function", "package p\n\nfunc f(err error) {\n\t//`x := err#\n}\n"},
+		{"a variable in a function literal", "package p\n\nfunc f() {\n\teach(func() {\n\t\terr := 1\n\t\t_ = err\n\t})\n\t//`x := err#\n}\n"},
+		{"a function of the package", "package p\n\nfunc err() {}\n\n" + use},
+		{"a variable of another function", "package p\n\nfunc other() {\n\terr := 1\n\t_ = err\n}\n\n" + use},
+	} {
+		t.Run(c.description, func(t *testing.T) {
+			gen := compile(t, c.template)
+			for _, want := range []string{`err_qd := qudyGensym("err")`, "g.generate(`x := %v\n`, err_qd)"} {
+				if !strings.Contains(gen, want) {
+					t.Errorf("compiled to\n%s\nwant it to hold\n%s", gen, want)
+				}
+			}
+		})
+	}
+}
+
+// both writes a variable of the template beside the gensym of the same name.
+const both = `package main
+
+import "fmt"
+
+func main() {
+	err := "theirs"
+	//` + "`" + `~err and err#
+}
+`
+
+func TestAGensymAndAVariableOfTheSameNameBothWork(t *testing.T) {
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("the go tool is not on the path")
+	}
+	gen, err := qudy.Compile("both.go", []byte(both), "fmt.Printf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "both_gen.go")
+	if err := os.WriteFile(file, gen, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.CommandContext(t.Context(), goTool, "run", file).CombinedOutput()
+	if err != nil {
+		t.Fatalf("the generator fails: %v\n%s", err, out)
+	}
+	if want := "theirs and err_qd1\n"; string(out) != want {
+		t.Errorf("the generator wrote %q, want %q", out, want)
+	}
+}
+
 func TestCompileRejects(t *testing.T) {
 	type testCase struct {
 		description string
@@ -274,9 +331,9 @@ func TestCompileRejects(t *testing.T) {
 		{"an output line after code on its line", template("count := compute() //`total := ~count", "_ = count"), "stands alone on its line"},
 		{"an output line outside a function body", "package p\n\n//`x := 1\nvar y = 1\n", "belongs inside a function body"},
 		{"a doc comment that opens with a backtick", "package p\n\n// `x` is a name\nfunc f() {}\n", "belongs inside a function body"},
+		{"a template with a name that ends in the reserved suffix", "package p\n\nfunc f() {\n\terr_qd := 1\n\t_ = err_qd\n}\n", "qudy reserves names that end in _qd"},
 		{"a template that declares GENSYM", "package p\n\nfunc GENSYM(s string) string { return s }\n", "which is a built-in function"},
 		{"a GENSYM call outside a function body", "package p\n\nvar x = GENSYM(\"x\")\n", "a GENSYM call belongs inside a function body"},
-		{"a gensym with the name of a template variable", "package p\n\nfunc f() {\n\terrName := 1\n\t_ = errName\n\t//`x := errName#\n}\n", "errName# would shadow"},
 	} {
 		t.Run(c.description, func(t *testing.T) {
 			_, err := qudy.Compile("test.go", []byte(c.template), "g.generate")

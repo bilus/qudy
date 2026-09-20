@@ -25,12 +25,12 @@ func (g *liveGenerator) generateDispatchEntry(name string, steps []navStep, recv
 	for _, p := range params {
 		local := qudyGensym(p.Name)
 		locals = append(locals, local)
-		errName := qudyGensym("errName")
+		errName_qd := qudyGensym("errName")
 		g.generate(`%v, %v := live.Param[%v](%v, %v)
 if %v != nil {
 	return %v
 }
-`, local, errName, p.Type.Text, event, strconv.Quote(p.Name), errName, errName)
+`, local, errName_qd, p.Type.Text, event, strconv.Quote(p.Name), errName_qd, errName_qd)
 	}
 	for i, s := range steps {
 		if i > 0 {
@@ -46,8 +46,8 @@ if %v != nil {
 		callee = h.field + "." + h.method
 	}
 	if fill != "" {
-		decodeErr := qudyGensym("decodeErr")
-		ruleErr := qudyGensym("ruleErr")
+		decodeErr_qd := qudyGensym("decodeErr")
+		ruleErr_qd := qudyGensym("ruleErr")
 		g.generate(`if %v := form.Decode(&%v.%v, %v); %v != nil {
 	return %v
 }
@@ -55,7 +55,7 @@ if %v := form.Validate(&%v.%v); %v != nil {
 	return %v
 }
 return form.Update(&%v.%v, func() {
-`, decodeErr, recv, fill, event, decodeErr, decodeErr, ruleErr, recv, fill, ruleErr, ruleErr, recv, fill)
+`, decodeErr_qd, recv, fill, event, decodeErr_qd, decodeErr_qd, ruleErr_qd, recv, fill, ruleErr_qd, ruleErr_qd, recv, fill)
 	}
 	g.generate(`%v.%v(lv`, recv, callee)
 	for _, s := range steps {

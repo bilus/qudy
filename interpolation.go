@@ -30,7 +30,7 @@ func scanOutputLine(line string) (string, []string, []string, error) {
 		if isNameStart(c) {
 			n := nameLen(line[i:])
 			if i+n < len(line) && line[i+n] == '#' && !strings.HasPrefix(line[i+n:], "##") {
-				args = append(args, line[i:i+n])
+				args = append(args, gensymName(line[i:i+n]))
 				gensyms = append(gensyms, line[i:i+n])
 				format.WriteString(verb)
 				i += n + 1

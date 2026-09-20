@@ -25,8 +25,8 @@ type %v interface{ %v() }
 		g.generate(`func (%v) %v() {}
 `, v, marker)
 	}
-	s := qudyGensym("s")
-	R := qudyGensym("R")
+	s_qd := qudyGensym("s")
+	R_qd := qudyGensym("R")
 	g.generate(`
 // %v is one of its variants, and %v when it is the zero value.
 type %v struct{ v %v }
@@ -42,14 +42,14 @@ func %v[V %v](v V) %v { return %v{v: v} }
 
 // Match calls the function for the %v's variant.
 func (%v %v) Match[%v any](
-`, sum.name, sum.defaultVariant, sum.name, iface, sum.constraint(), sum.name, sum.constraint(), sum.union(), iface, sum.constructor(), sum.name, sum.constructor(), sum.constraint(), sum.name, sum.name, sum.name, s, sum.name, R)
+`, sum.name, sum.defaultVariant, sum.name, iface, sum.constraint(), sum.name, sum.constraint(), sum.union(), iface, sum.constructor(), sum.name, sum.constructor(), sum.constraint(), sum.name, sum.name, sum.name, s_qd, sum.name, R_qd)
 	for _, v := range sum.variants {
 		g.generate(`	%v func(%v) %v,
-`, branch(v), v, R)
+`, branch(v), v, R_qd)
 	}
 	g.generate(`) %v {
 	switch v := %v.v.(type) {
-`, R, s)
+`, R_qd, s_qd)
 	for _, v := range sum.variants {
 		g.generate(`	case %v:
 		return %v(v)

@@ -34,10 +34,7 @@ func Compile(filename string, src []byte, emit string) ([]byte, error) {
 			if in, ok := declaredIn[name]; ok && in.from <= runAt && runAt <= in.to {
 				continue
 			}
-			if t.declared[name] {
-				return fmt.Errorf("%s:%d: the variable for %s# would shadow the template's %s", filename, runAt, name, name)
-			}
-			gen = append(gen, name+" := "+gensymVariable+"("+strconv.Quote(name)+")")
+			gen = append(gen, gensymName(name)+" := "+gensymVariable+"("+strconv.Quote(name)+")")
 			declaredIn[name] = t.blockOf(runAt)
 		}
 		gen = append(gen, call)
@@ -105,7 +102,7 @@ func (t *template) rewriteBuiltinCalls(line int, text string) string {
 func (t *template) gensymBodies() map[int]bool {
 	bodies := map[int]bool{}
 	need := func(line int) {
-		if body := t.outerFuncBodyOf(line); !t.ownGensyms.declaredIn(body) {
+		if body := t.outerFuncBodyOf(line); !t.ownGensym[body] {
 			bodies[body.from] = true
 		}
 	}
