@@ -3,19 +3,29 @@ package generator
 // generateDispatchEntry writes the table's entry for one handler, on the
 // receiver or on the nested instance the steps lead to.
 func (g *liveGenerator) generateDispatchEntry(name string, steps []navStep, recv string, h handlerBinding) {
-	symbols := newSymbolGenerator()
+	qudyGensym := func() func(string) string {
+		counts := map[string]int{}
+		return func(want string) string {
+			counts[want]++
+			digits := ""
+			for n := counts[want]; n > 0; n /= 10 {
+				digits = string(rune('0'+n%10)) + digits
+			}
+			return want + "_qd" + digits
+		}
+	}()
 	params := valueParams(h.sig)
 	event := "_"
 	if len(params) > 0 || h.fill != "" {
-		event = symbols.gensym("e")
+		event = qudyGensym("e")
 	}
 	var locals []string
 	g.generate(`%s: func(lv live.Ctx, %s live.Event) error {
 `, strconv.Quote(name), event)
 	for _, p := range params {
-		local := symbols.gensym(p.Name)
+		local := qudyGensym(p.Name)
 		locals = append(locals, local)
-		errName := symbols.gensym("errName")
+		errName := qudyGensym("errName")
 		g.generate(`%s, %s := live.Param[%s](%s, %s)
 if %s != nil {
 	return %s
@@ -36,8 +46,8 @@ if %s != nil {
 		callee = h.field + "." + h.method
 	}
 	if fill != "" {
-		decodeErr := symbols.gensym("decodeErr")
-		ruleErr := symbols.gensym("ruleErr")
+		decodeErr := qudyGensym("decodeErr")
+		ruleErr := qudyGensym("ruleErr")
 		g.generate(`if %s := form.Decode(&%s.%s, %s); %s != nil {
 	return %s
 }

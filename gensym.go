@@ -1,33 +1,17 @@
 package qudy
 
-// SymbolGenerator is the variable, create expression and method of the generator's symbol generator.
-type SymbolGenerator struct {
-	variable string
-	create   string
-	method   string
-}
+// gensymVariable is the name of the symbol generator in a function body.
+const gensymVariable = "qudyGensym"
 
-// NewSymbolGenerator returns a symbol generator, such as NewSymbolGenerator("symbols", "newSymbolGenerator()", "gensym").
-func NewSymbolGenerator(variable, create, method string) SymbolGenerator {
-	return SymbolGenerator{variable: variable, create: create, method: method}
-}
-
-// decl returns the short variable declaration of the symbol generator.
-func (s SymbolGenerator) decl() string {
-	return s.variable + " := " + s.create
-}
-
-// methodValue returns the symbol generator's method value, such as symbols.gensym.
-func (s SymbolGenerator) methodValue() string {
-	return s.variable + "." + s.method
-}
-
-// callFor returns the call to the symbol generator's method with want as its argument.
-func (s SymbolGenerator) callFor(want string) string {
-	return s.methodValue() + "(" + want + ")"
-}
-
-// isZero reports whether the symbol generator is the zero value.
-func (s SymbolGenerator) isZero() bool {
-	return s == SymbolGenerator{}
-}
+// gensymDecl is the declaration of the built-in symbol generator.
+const gensymDecl = gensymVariable + ` := func() func(string) string {
+	counts := map[string]int{}
+	return func(want string) string {
+		counts[want]++
+		digits := ""
+		for n := counts[want]; n > 0; n /= 10 {
+			digits = string(rune('0'+n%10)) + digits
+		}
+		return want + "_qd" + digits
+	}
+}()`

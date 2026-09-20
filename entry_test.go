@@ -14,7 +14,7 @@ func TestCompileTheEntryTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gen, err := qudy.Compile("entry.go", src, "g.generate", symbols)
+	gen, err := qudy.Compile("entry.go", src, "g.generate")
 	if err != nil {
 		t.Fatal(err)
 	}

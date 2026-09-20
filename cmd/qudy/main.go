@@ -4,38 +4,41 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
-	"strings"
 
 	"github.com/bilus/qudy"
 )
 
 func main() {
 	emit := flag.String("emit", "g.generate", "the emit function: the function of the generator that writes a run of output lines")
-	symbols := flag.String("symbols", "", "the symbol generator, as variable,create,method; create is empty when the template declares the variable")
-	out := flag.String("o", "", "the file for the generator")
+	out := flag.String("o", "", "the file for the generator, or with -txtar the directory for the files")
+	extract := flag.Bool("txtar", false, "read a txtar archive from standard input and write its files, gofmt-formatted")
 	flag.Parse()
-	if flag.NArg() != 1 || *out == "" {
-		fmt.Fprintln(os.Stderr, "usage: qudy [-emit func] [-symbols variable,create,method] -o out.go template.go")
+	var err error
+	switch {
+	case *extract && flag.NArg() == 0:
+		err = extractArchive(*out)
+	case !*extract && flag.NArg() == 1 && *out != "":
+		err = compileFile(flag.Arg(0), *out, *emit)
+	default:
+		fmt.Fprintln(os.Stderr, "usage: qudy [-emit func] -o out.go template.go")
+		fmt.Fprintln(os.Stderr, "       qudy -txtar [-o dir] < archive")
 		os.Exit(2)
 	}
-	if err := compileFile(flag.Arg(0), *out, *emit, *symbols); err != nil {
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "qudy:", err)
 		os.Exit(1)
 	}
 }
 
 // compileFile compiles one template and writes the generator after a Code generated comment.
-func compileFile(template, out, emit, symbolsFlag string) error {
-	symbols, err := parseSymbolGenerator(symbolsFlag)
-	if err != nil {
-		return err
-	}
+func compileFile(template, out, emit string) error {
 	src, err := os.ReadFile(template)
 	if err != nil {
 		return err
 	}
-	gen, err := qudy.Compile(template, src, emit, symbols)
+	gen, err := qudy.Compile(template, src, emit)
 	if err != nil {
 		return err
 	}
@@ -43,14 +46,16 @@ func compileFile(template, out, emit, symbolsFlag string) error {
 	return os.WriteFile(out, append([]byte(header), gen...), 0o644)
 }
 
-// parseSymbolGenerator parses the -symbols flag, empty for a template without gensyms.
-func parseSymbolGenerator(flag string) (qudy.SymbolGenerator, error) {
-	if flag == "" {
-		return qudy.SymbolGenerator{}, nil
+// extractArchive writes the files of the archive on standard input under dir.
+func extractArchive(dir string) error {
+	archive, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return err
 	}
-	parts := strings.Split(flag, ",")
-	if len(parts) != 3 {
-		return qudy.SymbolGenerator{}, fmt.Errorf("-symbols takes variable,create,method, got %q", flag)
+	comment, err := qudy.Extract(archive, dir)
+	if err != nil {
+		return err
 	}
-	return qudy.NewSymbolGenerator(parts[0], parts[1], parts[2]), nil
+	_, err = os.Stdout.Write(comment)
+	return err
 }

@@ -11,12 +11,14 @@ import (
 // template is a parsed template.
 type template struct {
 	filename     string
+	packageLine  int
 	lines        []string
 	outputLines  map[int]string
 	blocks       []span
 	funcBodies   []span
 	declared     map[string]bool
 	builtinCalls []builtinCall
+	ownGensyms   ownGensyms
 }
 
 // newTemplate parses a template and rejects misplaced output lines and GENSYM calls.
@@ -28,12 +30,14 @@ func newTemplate(filename string, src []byte) (*template, error) {
 	}
 	t := &template{
 		filename:     filename,
+		packageLine:  fset.Position(file.Package).Line,
 		lines:        splitLines(string(src)),
 		outputLines:  map[int]string{},
 		blocks:       blockSpans(fset, file),
 		funcBodies:   funcBodySpans(fset, file),
 		declared:     declaredNames(file),
 		builtinCalls: findBuiltinCalls(fset, file),
+		ownGensyms:   findOwnGensyms(fset, file),
 	}
 	if t.declared[gensymBuiltin] {
 		return nil, fmt.Errorf("%s: the template declares %s, which is a built-in function", filename, gensymBuiltin)
@@ -113,6 +117,17 @@ func (t *template) blockOf(line int) span {
 // funcBodyOf returns the innermost function body that holds a line, or the zero span.
 func (t *template) funcBodyOf(line int) span {
 	return innermost(t.funcBodies, line)
+}
+
+// outerFuncBodyOf returns the outermost function body that holds a line, or the zero span.
+func (t *template) outerFuncBodyOf(line int) span {
+	var found span
+	for _, s := range t.funcBodies {
+		if s.from <= line && line <= s.to && (found == (span{}) || s.from < found.from) {
+			found = s
+		}
+	}
+	return found
 }
 
 // innermost returns the smallest span that holds a line, or the zero span.
@@ -214,4 +229,87 @@ func declaredNames(file *ast.File) map[string]bool {
 		return true
 	})
 	return names
+}
+
+// ownGensyms is where a template declares its own symbol generator.
+type ownGensyms struct {
+	packageLevel bool
+	lines        []int
+}
+
+// newOwnGensyms returns the declarations at package level and on the given lines.
+func newOwnGensyms(packageLevel bool, lines []int) ownGensyms {
+	return ownGensyms{packageLevel: packageLevel, lines: lines}
+}
+
+// declaredIn reports whether the template declares a symbol generator for a function body.
+func (o ownGensyms) declaredIn(body span) bool {
+	if o.packageLevel {
+		return true
+	}
+	for _, line := range o.lines {
+		if body.from <= line && line <= body.to {
+			return true
+		}
+	}
+	return false
+}
+
+// findOwnGensyms finds every declaration of the symbol generator in the template.
+func findOwnGensyms(fset *token.FileSet, file *ast.File) ownGensyms {
+	packageLevel := false
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			packageLevel = packageLevel || d.Name.Name == gensymVariable
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				if vs, ok := spec.(*ast.ValueSpec); ok && names(vs.Names, gensymVariable) {
+					packageLevel = true
+				}
+			}
+		}
+	}
+	var lines []int
+	add := func(pos token.Pos) { lines = append(lines, fset.Position(pos).Line) }
+	param := func(typ *ast.FuncType, body *ast.BlockStmt) {
+		if body == nil {
+			return
+		}
+		for _, field := range typ.Params.List {
+			if names(field.Names, gensymVariable) {
+				add(body.Lbrace)
+			}
+		}
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncDecl:
+			param(n.Type, n.Body)
+		case *ast.FuncLit:
+			param(n.Type, n.Body)
+		case *ast.AssignStmt:
+			for _, lhs := range n.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok && n.Tok == token.DEFINE && id.Name == gensymVariable {
+					add(n.Pos())
+				}
+			}
+		case *ast.ValueSpec:
+			if names(n.Names, gensymVariable) {
+				add(n.Pos())
+			}
+		}
+		return true
+	})
+	return newOwnGensyms(packageLevel, lines)
+}
+
+// names reports whether a list of identifiers holds a name.
+func names(idents []*ast.Ident, name string) bool {
+	for _, id := range idents {
+		if id.Name == name {
+			return true
+		}
+	}
+	return false
 }

@@ -13,7 +13,7 @@ import (
 const backtick = "`"
 
 // Compile turns a template into the Go source of its generator.
-func Compile(filename string, src []byte, emit string, symbols SymbolGenerator) ([]byte, error) {
+func Compile(filename string, src []byte, emit string) ([]byte, error) {
 	t, err := newTemplate(filename, src)
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func Compile(filename string, src []byte, emit string, symbols SymbolGenerator) 
 			if t.declared[name] {
 				return fmt.Errorf("%s:%d: the variable for %s# would shadow the template's %s", filename, runAt, name, name)
 			}
-			gen = append(gen, name+" := "+symbols.callFor(strconv.Quote(name)))
+			gen = append(gen, name+" := "+gensymVariable+"("+strconv.Quote(name)+")")
 			declaredIn[name] = t.blockOf(runAt)
 		}
 		gen = append(gen, call)
@@ -56,16 +56,18 @@ func Compile(filename string, src []byte, emit string, symbols SymbolGenerator) 
 		if err := flush(); err != nil {
 			return nil, err
 		}
-		declares := bodies[i+1] && !t.declared[symbols.variable]
-		if declares && symbols.isZero() {
-			return nil, fmt.Errorf("%s:%d: the function body holds a gensym, and the compiler was given no symbol generator", filename, i+1)
+		if isGenerateDirective(line) {
+			// The directive compiles the template, so it stays out of the generator.
+			continue
 		}
-		if declares && symbols.create == "" {
-			return nil, fmt.Errorf("%s:%d: the function body holds a gensym, the template does not declare %s, and the symbol generator has no create expression", filename, i+1, symbols.variable)
+		if i+1 < t.packageLine && isConstraint(line) {
+			if line, err = generatorConstraint(line); err != nil {
+				return nil, fmt.Errorf("%s:%d: %w", filename, i+1, err)
+			}
 		}
-		gen = append(gen, t.rewriteBuiltinCalls(i+1, line, symbols))
-		if declares {
-			gen = append(gen, symbols.decl())
+		gen = append(gen, t.rewriteBuiltinCalls(i+1, line))
+		if bodies[i+1] {
+			gen = append(gen, gensymDecl)
 		}
 	}
 	if err := flush(); err != nil {
@@ -88,22 +90,27 @@ func outputText(comment string) (string, bool) {
 	return strings.CutPrefix(text, backtick)
 }
 
-// rewriteBuiltinCalls replaces each GENSYM on a line with the symbol generator's method value.
-func (t *template) rewriteBuiltinCalls(line int, text string, symbols SymbolGenerator) string {
+// rewriteBuiltinCalls replaces each GENSYM on a line with the symbol generator.
+func (t *template) rewriteBuiltinCalls(line int, text string) string {
 	calls := t.builtinCallsOn(line)
 	// Rightmost first keeps the columns of the other calls valid.
 	slices.SortFunc(calls, func(a, b builtinCall) int { return b.from - a.from })
 	for _, c := range calls {
-		text = text[:c.from-1] + symbols.methodValue() + text[c.to-1:]
+		text = text[:c.from-1] + gensymVariable + text[c.to-1:]
 	}
 	return text
 }
 
-// gensymBodies returns the opening line of every function body with a gensym.
+// gensymBodies returns the opening lines of function bodies that need the built-in symbol generator.
 func (t *template) gensymBodies() map[int]bool {
 	bodies := map[int]bool{}
+	need := func(line int) {
+		if body := t.outerFuncBodyOf(line); !t.ownGensyms.declaredIn(body) {
+			bodies[body.from] = true
+		}
+	}
 	for _, c := range t.builtinCalls {
-		bodies[t.funcBodyOf(c.line).from] = true
+		need(c.line)
 	}
 	for line, text := range t.outputLines {
 		// The line's run reports the error.
@@ -111,7 +118,7 @@ func (t *template) gensymBodies() map[int]bool {
 		if err != nil || len(gensyms) == 0 {
 			continue
 		}
-		bodies[t.funcBodyOf(line).from] = true
+		need(line)
 	}
 	return bodies
 }

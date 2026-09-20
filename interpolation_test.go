@@ -55,7 +55,7 @@ func TestCompileRejectsAnInterpolation(t *testing.T) {
 		{"a hash without a name before it", "x := #n", "follows the name of a gensym"},
 	} {
 		t.Run(c.description, func(t *testing.T) {
-			_, err := qudy.Compile("test.go", []byte(template("//`"+c.line)), "g.generate", symbols)
+			_, err := qudy.Compile("test.go", []byte(template("//`"+c.line)), "g.generate")
 			if err == nil || !strings.Contains(err.Error(), c.rejects) {
 				t.Fatalf("Compile returned %v, want a rejection naming %q", err, c.rejects)
 			}
