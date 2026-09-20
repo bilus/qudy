@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-//go:generate go run ../../cmd/qudy -emit fmt.Printf -o write_gen.go write.go
+//go:generate go run ../../cmd/qudy -o write_gen.go write.go
 
 func main() {
 	pkg := flag.String("package", "main", "the package of the generated files")

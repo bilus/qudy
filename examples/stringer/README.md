@@ -43,9 +43,9 @@ The same `return` line, written by hand:
 
     fmt.Printf("\treturn fmt.Sprintf(\"%s(%%d)\", v)\n", typ)
 
-`go generate` compiles the template into `stringer_gen.go` with
-`-emit fmt.Printf`, so the generator prints to standard output and needs no
-type of its own. Nothing else in this directory is written by hand, and the
+`go generate` compiles the template into `stringer_gen.go`. The emit function
+is the default, `fmt.Printf`, so the generator prints to standard output and
+needs no type of its own. Nothing else in this directory is written by hand, and the
 symbol generator behind `v#` and `x#` is part of `stringer_gen.go`.
 
 ## The first two lines

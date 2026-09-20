@@ -70,10 +70,7 @@ source. Create a `stringer` directory and save this as `stringer/stringer.go`:
 
 package main
 
-import (
-    "fmt"
-    "os"
-)
+import "os"
 
 func main() {
     pkg, typ, names := os.Args[1], os.Args[2], os.Args[3:]
@@ -112,16 +109,16 @@ go install github.com/bilus/qudy/cmd/qudy@latest
 First, compile the template into a Go program:
 
 ```sh
-qudy -emit fmt.Printf -o stringer/stringer_gen.go stringer/stringer.go
+qudy -o stringer/stringer_gen.go stringer/stringer.go
 ```
 
 Then run that program to generate the method:
 
 ```sh
-go run ./stringer colors Color Red Green Blue > color_string.go
+go run ./stringer colors Color Red Green Blue > color_string_gen.go
 ```
 
-`color_string.go` now holds:
+`color_string_gen.go` now holds:
 
 ```go
 package colors
@@ -152,7 +149,7 @@ equivalent to:
 fmt.Printf("\tcase %v:\n\t\treturn \"%v\"\n", name, name)
 ```
 
-The `-emit` flag chooses that function; it defaults to `g.generate`. You can use
+The `-emit` flag chooses that function. It defaults to `fmt.Printf`.  You can use
 an existing generator's method to write to a buffer or file. qudy combines a
 **run** of consecutive output lines into one call, uses `%v` for inserted values,
 and escapes literal percent signs, which is why the template can say `%d`.
@@ -165,8 +162,9 @@ A template parses as Go, so `gofmt` can format it and your editor can read it.
 It may not build as Go: variables used only in output lines look unused to the
 Go compiler. So start a template with `//go:build qudy`, and a normal build
 ignores it. qudy writes `//go:build !qudy` into the generator, so the two never
-build together. By convention, name the generator after its template, with
-`_gen.go` in place of `.go`; the CLI writes to the path supplied with `-o`.
+build together. Name generated Go files with the `_gen.go` suffix. For a
+compiled template, replace `.go` with `_gen.go`: `stringer.go` becomes
+`stringer_gen.go`. The CLI writes to the path supplied with `-o`.
 
 To get completion and navigation inside a template, give your editor the tag,
 for example `-tags=qudy` in the `buildFlags` of gopls. It then loads the
@@ -178,24 +176,78 @@ The quick start runs qudy by hand. To run it with `go generate`, see
 
 ## Insert values into the output
 
-`~name` is an **interpolation**: qudy inserts the value of `name` there. Use
-`~name` for a variable and `~p.Type.Text` for a selector. Use a **braced
-interpolation**, `~{expr}`, for calls, indexes, or other Go expressions. A name
-without braces is an ASCII Go identifier:
+`~name` is an **interpolation**: qudy inserts the value of `name` there.
+For example, inside a template function:
 
 ```go
-//`func (~name) ~method() {}
+foo := "XXX"
+count := 3
+//`~foo
+//`~count
+```
+
+Produces:
+
+```text
+XXX
+3
+```
+
+qudy formats each inserted value with `%v`, so numbers need no conversion.
+You can also capture a selector:
+
+```go
+p := struct{ Name string }{Name: "Color"}
+//`type ~p.Name int
+```
+
+Produces:
+
+```text
+type Color int
+```
+
+Without braces, `~` captures the next Go identifier and any selectors that
+follow it, as in `~p.Name`. Each identifier must use only ASCII letters, digits,
+and underscores, and cannot start with a digit.
+
+Use a **braced interpolation**, `~{expr}`, to capture a call, index, or other Go
+expression. This example uses `strconv.Quote` from the standard library:
+
+```go
+label := "hello"
+values := []int{10, 20}
 //`var label = ~{strconv.Quote(label)}
 //`var first = ~{values[0]}
 ```
 
-An interpolation without braces stops before a bracket or parenthesis.
-For example, `~xs[0]` inserts `xs` followed by the literal text `[0]`.
-This lets you write expressions in the generated code without braces around
-every inserted name.
+Produces:
 
-qudy formats each inserted value with `%v`, so a number works as well as a
-string: `~count` needs no conversion.
+```text
+var label = "hello"
+var first = 10
+```
+
+Without braces, capture stops before a bracket or parenthesis. Compare:
+
+```go
+name := "items"
+//`~name[0]
+//`~{name[0]}
+```
+
+Produces:
+
+```text
+items[0]
+105
+```
+
+`~name[0]` captures only `name`, inserting its value followed by the literal
+text `[0]`. `~{name[0]}` evaluates the index in the generator: the first byte of
+`"items"` is `'i'`, whose numeric value is 105. This distinction lets you write
+indexing and calls in the generated code as well as evaluate them in the
+generator.
 
 ## Output lines and comments
 
@@ -291,15 +343,15 @@ qudy rewrites `GENSYM` to `qudyGensym`.
 
 ## Generate several files
 
-Have your generator print a txtar archive: a line such as `-- color_string.go --`
+Have your generator print a txtar archive: a line such as `-- color_string_gen.go --`
 starts a new file. Inside a template function, file markers are ordinary output
 lines:
 
 ```go
-//`-- color_string.go --
+//`-- color_string_gen.go --
 //`package colors
 //`// String methods go here.
-//`-- color_parse.go --
+//`-- color_parse_gen.go --
 //`package colors
 //`// Parse functions go here.
 ```

@@ -2,8 +2,6 @@
 
 package main
 
-import "fmt"
-
 // writeParse writes the file with the function that parses an enum's constant names.
 func writeParse(file, pkg, typ string, names []string) {
 	//`-- ~{file}_parse.go --

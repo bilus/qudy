@@ -3,7 +3,7 @@
 // Command stringer writes the String method of an enum, as an example of qudy.
 package main
 
-//go:generate go run ../../cmd/qudy -emit fmt.Printf -o stringer_gen.go stringer.go
+//go:generate go run ../../cmd/qudy -o stringer_gen.go stringer.go
 
 import (
 	"flag"

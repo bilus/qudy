@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	emit := flag.String("emit", "g.generate", "the emit function: the function of the generator that writes a run of output lines")
+	emit := flag.String("emit", "fmt.Printf", "the emit function: the function of the generator that writes a run of output lines")
 	out := flag.String("o", "", "the file for the generator, or with -txtar the directory for the files")
 	extract := flag.Bool("txtar", false, "read a txtar archive from standard input and write its files, gofmt-formatted")
 	flag.Parse()
