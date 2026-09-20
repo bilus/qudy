@@ -53,12 +53,12 @@ func TestCompileWritesTheEmitCalls(t *testing.T) {
 		{
 			"an interpolation becomes an argument",
 			template("//`return ~err"),
-			"g.generate(`return %s\n`, err)",
+			"g.generate(`return %v\n`, err)",
 		},
 		{
 			"the compiler keeps the code around a run",
 			template("for i := range xs {", "//`x := ~i", "}"),
-			"for i := range xs {\n\t\tg.generate(`x := %s\n`, i)\n\t}",
+			"for i := range xs {\n\t\tg.generate(`x := %v\n`, i)\n\t}",
 		},
 		{
 			"an indented output line writes its text without the indent",
@@ -103,22 +103,22 @@ func TestCompileWritesTheEmitCalls(t *testing.T) {
 		{
 			"the compiler declares a gensym before its run",
 			template("//`~x := errName#"),
-			"errName := qudyGensym(\"errName\")\n\tg.generate(`%s := %s\n`, x, errName)",
+			"errName := qudyGensym(\"errName\")\n\tg.generate(`%v := %v\n`, x, errName)",
 		},
 		{
 			"a second run in the same block reuses the gensym",
 			template("//`a := errName#", "x := 1", "//`b := errName#"),
-			"errName := qudyGensym(\"errName\")\n\tg.generate(`a := %s\n`, errName)\n\tx := 1\n\tg.generate(`b := %s\n`, errName)",
+			"errName := qudyGensym(\"errName\")\n\tg.generate(`a := %v\n`, errName)\n\tx := 1\n\tg.generate(`b := %v\n`, errName)",
 		},
 		{
 			"a run in a loop declares the gensym inside the loop",
 			template("for range xs {", "//`a := errName#", "}"),
-			"for range xs {\n\t\terrName := qudyGensym(\"errName\")\n\t\tg.generate(`a := %s\n`, errName)\n\t}",
+			"for range xs {\n\t\terrName := qudyGensym(\"errName\")\n\t\tg.generate(`a := %v\n`, errName)\n\t}",
 		},
 		{
 			"a sibling block declares its own gensym",
 			template("if x {", "//`a := errName#", "}", "if y {", "//`b := errName#", "}"),
-			"if y {\n\t\terrName := qudyGensym(\"errName\")\n\t\tg.generate(`b := %s\n`, errName)\n\t}",
+			"if y {\n\t\terrName := qudyGensym(\"errName\")\n\t\tg.generate(`b := %v\n`, errName)\n\t}",
 		},
 		{
 			"a line inside a block comment is not an output line",
@@ -134,14 +134,14 @@ func TestCompileWritesTheEmitCalls(t *testing.T) {
 	}
 }
 
-// twelve writes twelve gensyms, enough for a number with two digits.
+// twelve writes twelve gensyms, enough for two digits, and interpolates an int.
 const twelve = `package main
 
 import "fmt"
 
 func main() {
-	for range 12 {
-		//` + "`" + `e# := 0
+	for i := range 12 {
+		//` + "`" + `e# := ~i
 	}
 }
 `
@@ -163,10 +163,10 @@ func TestCompiledGeneratorRunsAsASingleFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the generator fails: %v\n%s", err, out)
 	}
-	if want := "e_qd1 := 0\ne_qd2 := 0\n"; !strings.HasPrefix(string(out), want) {
+	if want := "e_qd1 := 0\ne_qd2 := 1\n"; !strings.HasPrefix(string(out), want) {
 		t.Errorf("the generator wrote\n%s\nwant it to start with\n%s", out, want)
 	}
-	if want := "e_qd12 := 0\n"; !strings.HasSuffix(string(out), want) {
+	if want := "e_qd12 := 11\n"; !strings.HasSuffix(string(out), want) {
 		t.Errorf("the generator wrote\n%s\nwant it to end with\n%s", out, want)
 	}
 }

@@ -110,12 +110,12 @@ qudy turns the template's two output lines inside the loop into a call
 equivalent to:
 
 ```go
-fmt.Printf("\tcase %s:\n\t\treturn \"%s\"\n", name, name)
+fmt.Printf("\tcase %v:\n\t\treturn \"%v\"\n", name, name)
 ```
 
 The `-emit` flag chooses that function; it defaults to `g.generate`. You can use
 an existing generator's method to write to a buffer or file. qudy combines a
-**run** of consecutive output lines into one call, uses `%s` for inserted values, and escapes
+**run** of consecutive output lines into one call, uses `%v` for inserted values, and escapes
 literal percent signs, which is why the template can say `%d`. Your emit function must accept a format string and its
 arguments and interpret them like `fmt.Printf`.
 
@@ -152,8 +152,8 @@ For example, `~xs[0]` inserts `xs` followed by the literal text `[0]`.
 This lets you write expressions in the generated code without braces around
 every inserted name.
 
-qudy formats each inserted value with `%s`. Convert other values to strings in
-the template when needed, for example with `~{strconv.Itoa(count)}`.
+qudy formats each inserted value with `%v`, so a number works as well as a
+string: `~count` needs no conversion.
 
 ## Output lines and comments
 

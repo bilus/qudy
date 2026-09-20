@@ -20,15 +20,15 @@ func (g *liveGenerator) generateDispatchEntry(name string, steps []navStep, recv
 		event = qudyGensym("e")
 	}
 	var locals []string
-	g.generate(`%s: func(lv live.Ctx, %s live.Event) error {
+	g.generate(`%v: func(lv live.Ctx, %v live.Event) error {
 `, strconv.Quote(name), event)
 	for _, p := range params {
 		local := qudyGensym(p.Name)
 		locals = append(locals, local)
 		errName := qudyGensym("errName")
-		g.generate(`%s, %s := live.Param[%s](%s, %s)
-if %s != nil {
-	return %s
+		g.generate(`%v, %v := live.Param[%v](%v, %v)
+if %v != nil {
+	return %v
 }
 `, local, errName, p.Type.Text, event, strconv.Quote(p.Name), errName, errName)
 	}
@@ -37,7 +37,7 @@ if %s != nil {
 			g.generate(`{
 `)
 		}
-		g.generate(`%s := %s
+		g.generate(`%v := %v
 `, s.param, s.state)
 		recv = s.param
 	}
@@ -48,23 +48,23 @@ if %s != nil {
 	if fill != "" {
 		decodeErr := qudyGensym("decodeErr")
 		ruleErr := qudyGensym("ruleErr")
-		g.generate(`if %s := form.Decode(&%s.%s, %s); %s != nil {
-	return %s
+		g.generate(`if %v := form.Decode(&%v.%v, %v); %v != nil {
+	return %v
 }
-if %s := form.Validate(&%s.%s); %s != nil {
-	return %s
+if %v := form.Validate(&%v.%v); %v != nil {
+	return %v
 }
-return form.Update(&%s.%s, func() {
+return form.Update(&%v.%v, func() {
 `, decodeErr, recv, fill, event, decodeErr, decodeErr, ruleErr, recv, fill, ruleErr, ruleErr, recv, fill)
 	}
-	g.generate(`%s.%s(lv`, recv, callee)
+	g.generate(`%v.%v(lv`, recv, callee)
 	for _, s := range steps {
 		if s.id != "" {
-			g.generate(`.WithID(%s)`, strconv.Quote(s.id))
+			g.generate(`.WithID(%v)`, strconv.Quote(s.id))
 		}
 	}
 	for _, local := range locals {
-		g.generate(`, %s`, local)
+		g.generate(`, %v`, local)
 	}
 	g.generate(`)
 `)

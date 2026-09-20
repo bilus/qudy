@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 )
 
 func main() {
@@ -45,7 +44,7 @@ func writeStringer(pkg, typ string, names []string) {
 	//`	// An "invalid array index" error means that a constant's value changed.
 	//`	var x# [1]struct{}
 	for i, name := range names {
-		//`	_ = x#[~name-~{strconv.Itoa(i)}]
+		//`	_ = x#[~name-~i]
 	}
 	//`}
 }

@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// verb formats every interpolation and gensym in an emit call.
+const verb = "%v"
+
 // scanOutputLine splits an output line into a format, its arguments and its gensyms.
 func scanOutputLine(line string) (string, []string, []string, error) {
 	var format strings.Builder
@@ -29,7 +32,7 @@ func scanOutputLine(line string) (string, []string, []string, error) {
 			if i+n < len(line) && line[i+n] == '#' && !strings.HasPrefix(line[i+n:], "##") {
 				args = append(args, line[i:i+n])
 				gensyms = append(gensyms, line[i:i+n])
-				format.WriteString("%s")
+				format.WriteString(verb)
 				i += n + 1
 				continue
 			}
@@ -55,7 +58,7 @@ func scanOutputLine(line string) (string, []string, []string, error) {
 				return "", nil, nil, err
 			}
 			args = append(args, strings.TrimSpace(rest[1:n-1]))
-			format.WriteString("%s")
+			format.WriteString(verb)
 			i += 1 + n
 		default:
 			n, err := selectorLen(rest)
@@ -63,7 +66,7 @@ func scanOutputLine(line string) (string, []string, []string, error) {
 				return "", nil, nil, err
 			}
 			args = append(args, rest[:n])
-			format.WriteString("%s")
+			format.WriteString(verb)
 			i += 1 + n
 		}
 	}
