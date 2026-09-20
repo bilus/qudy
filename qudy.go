@@ -1,4 +1,4 @@
-// Package qudy compiles a Go template into the generator that writes it.
+// Package qudy compiles a template into the Go source of its generator.
 package qudy
 
 import (
@@ -9,125 +9,111 @@ import (
 	"strings"
 )
 
-// outputMark opens the text of an output line, after the comment slashes.
-const outputMark = "`"
+// backtick is the character that opens the text of an output line.
+const backtick = "`"
 
 // Compile turns a template into the Go source of its generator.
-func Compile(filename string, src []byte, emit string, scope Scope) ([]byte, error) {
+func Compile(filename string, src []byte, emit string, symbols SymbolGenerator) ([]byte, error) {
 	t, err := newTemplate(filename, src)
 	if err != nil {
 		return nil, err
 	}
-	if t.declared[gensym] {
-		return nil, fmt.Errorf("%s: the template declares %s, which is a built-in", filename, gensym)
-	}
-	var out, run []string
+	var gen, run []string
 	var runAt int
-	declaredAt := map[string]span{}
-	opens := t.scopeOpeners()
+	declaredIn := map[string]span{}
+	bodies := t.gensymBodies()
 	flush := func() error {
 		if len(run) == 0 {
 			return nil
 		}
-		call, names, err := emitCall(emit, run)
+		call, gensyms, err := emitCall(emit, run)
 		if err != nil {
 			return fmt.Errorf("%s:%d: %w", filename, runAt, err)
 		}
-		for _, name := range names {
-			if at, ok := declaredAt[name]; ok && at.from <= runAt && runAt <= at.to {
+		for _, name := range gensyms {
+			if in, ok := declaredIn[name]; ok && in.from <= runAt && runAt <= in.to {
 				continue
 			}
-			if scope.empty() {
-				return fmt.Errorf("%s:%d: %s# is a name of the generated program, and the compiler was given no scope", filename, runAt, name)
-			}
 			if t.declared[name] {
-				return fmt.Errorf("%s:%d: the template declares %s, which %s# would shadow", filename, runAt, name, name)
+				return fmt.Errorf("%s:%d: the variable for %s# would shadow the template's %s", filename, runAt, name, name)
 			}
-			out = append(out, name+" := "+scope.fresh(name))
-			declaredAt[name] = t.blockOf(runAt)
+			gen = append(gen, name+" := "+symbols.callFor(strconv.Quote(name)))
+			declaredIn[name] = t.blockOf(runAt)
 		}
-		out = append(out, call)
+		gen = append(gen, call)
 		run = nil
 		return nil
 	}
 	for i, line := range t.lines {
-		text, ok := t.outputs[i+1]
-		if !ok {
-			if err := flush(); err != nil {
-				return nil, err
+		text, ok := t.outputLines[i+1]
+		if ok {
+			if len(run) == 0 {
+				runAt = i + 1
 			}
-			if line, err = t.callBuiltins(i+1, line, scope); err != nil {
-				return nil, fmt.Errorf("%s:%d: %w", filename, i+1, err)
-			}
-			out = append(out, line)
-			if opens[i+1] && !t.declared[scope.variable] {
-				if scope.empty() {
-					return nil, fmt.Errorf("%s:%d: the function asks for a fresh name, and the compiler was given no scope", filename, i+1)
-				}
-				if scope.create == "" {
-					return nil, fmt.Errorf("%s:%d: the function asks for a fresh name, and neither the template nor the scope creates %s", filename, i+1, scope.variable)
-				}
-				out = append(out, scope.decl())
-			}
+			run = append(run, text)
 			continue
 		}
-		if len(run) == 0 {
-			runAt = i + 1
+		if err := flush(); err != nil {
+			return nil, err
 		}
-		run = append(run, text)
+		declares := bodies[i+1] && !t.declared[symbols.variable]
+		if declares && symbols.isZero() {
+			return nil, fmt.Errorf("%s:%d: the function body holds a gensym, and the compiler was given no symbol generator", filename, i+1)
+		}
+		if declares && symbols.create == "" {
+			return nil, fmt.Errorf("%s:%d: the function body holds a gensym, the template does not declare %s, and the symbol generator has no create expression", filename, i+1, symbols.variable)
+		}
+		gen = append(gen, t.rewriteBuiltinCalls(i+1, line, symbols))
+		if declares {
+			gen = append(gen, symbols.decl())
+		}
 	}
 	if err := flush(); err != nil {
 		return nil, err
 	}
-	gen, err := format.Source([]byte(strings.Join(out, "\n")))
+	formatted, err := format.Source([]byte(strings.Join(gen, "\n")))
 	if err != nil {
 		return nil, fmt.Errorf("%s: the generator is not Go: %w", filename, err)
 	}
-	return gen, nil
+	return formatted, nil
 }
 
-// markText extracts the text of an output comment, in either gofmt spelling.
-func markText(comment string) (string, bool) {
+// outputText returns the text after the backtick, in either gofmt spelling.
+func outputText(comment string) (string, bool) {
 	text, ok := strings.CutPrefix(comment, "//")
 	if !ok {
 		return "", false
 	}
 	text = strings.TrimPrefix(text, " ")
-	return strings.CutPrefix(text, outputMark)
+	return strings.CutPrefix(text, backtick)
 }
 
-// callBuiltins rewrites a line's built-in calls, rightmost first.
-func (t *template) callBuiltins(line int, text string, scope Scope) (string, error) {
-	calls := t.builtinsOn(line)
-	slices.SortFunc(calls, func(a, b builtin) int { return b.from - a.from })
-	for _, b := range calls {
-		if scope.empty() {
-			return "", fmt.Errorf("%s is a name of the generated program, and the compiler was given no scope", b.name)
-		}
-		text = text[:b.from-1] + scope.call() + text[b.to-1:]
+// rewriteBuiltinCalls replaces each GENSYM on a line with the symbol generator's method value.
+func (t *template) rewriteBuiltinCalls(line int, text string, symbols SymbolGenerator) string {
+	calls := t.builtinCallsOn(line)
+	// Rightmost first keeps the columns of the other calls valid.
+	slices.SortFunc(calls, func(a, b builtinCall) int { return b.from - a.from })
+	for _, c := range calls {
+		text = text[:c.from-1] + symbols.methodValue() + text[c.to-1:]
 	}
-	return text, nil
+	return text
 }
 
-// scopeOpeners finds the opening line of every function body that needs a scope.
-func (t *template) scopeOpeners() map[int]bool {
-	opens := map[int]bool{}
-	for _, b := range t.builtins {
-		if f := t.funcOf(b.line); f != (span{}) {
-			opens[f.from] = true
-		}
+// gensymBodies returns the opening line of every function body with a gensym.
+func (t *template) gensymBodies() map[int]bool {
+	bodies := map[int]bool{}
+	for _, c := range t.builtinCalls {
+		bodies[t.funcBodyOf(c.line).from] = true
 	}
-	for line, text := range t.outputs {
+	for line, text := range t.outputLines {
 		// The line's run reports the error.
-		_, _, names, err := interpolate(text)
-		if err != nil || len(names) == 0 {
+		_, _, gensyms, err := scanOutputLine(text)
+		if err != nil || len(gensyms) == 0 {
 			continue
 		}
-		if f := t.funcOf(line); f != (span{}) {
-			opens[f.from] = true
-		}
+		bodies[t.funcBodyOf(line).from] = true
 	}
-	return opens
+	return bodies
 }
 
 // splitLines splits a file into lines without their newlines.
@@ -135,28 +121,28 @@ func splitLines(src string) []string {
 	return strings.Split(src, "\n")
 }
 
-// emitCall builds the call that writes a run, with the run's fresh names.
+// emitCall builds the emit call of a run and lists the run's gensyms.
 func emitCall(emit string, run []string) (string, []string, error) {
 	var text strings.Builder
-	var args, names []string
+	var args, gensyms []string
 	for _, line := range run {
-		format, lineArgs, lineNames, err := interpolate(line)
+		lineFormat, lineArgs, lineGensyms, err := scanOutputLine(line)
 		if err != nil {
 			return "", nil, err
 		}
-		format, ends := lineEnds(format)
-		text.WriteString(format)
+		lineFormat, ends := lineEnds(lineFormat)
+		text.WriteString(lineFormat)
 		if ends {
 			text.WriteByte('\n')
 		}
 		args = append(args, lineArgs...)
-		names = append(names, lineNames...)
+		gensyms = append(gensyms, lineGensyms...)
 	}
-	call := emit + "(" + literal(text.String())
+	call := emit + "(" + stringLiteral(text.String())
 	for _, a := range args {
 		call += ", " + a
 	}
-	return call + ")", names, nil
+	return call + ")", gensyms, nil
 }
 
 // lineEnds strips a trailing backslash and reports whether the line writes a newline.
@@ -170,16 +156,16 @@ func lineEnds(text string) (string, bool) {
 	return text, true
 }
 
-// literal quotes the text as a Go string literal, raw where possible.
-func literal(text string) string {
-	if canBackquote(text) {
+// stringLiteral returns the text as a Go string literal, raw where possible.
+func stringLiteral(text string) string {
+	if canBeRaw(text) {
 		return "`" + text + "`"
 	}
 	return strconv.Quote(text)
 }
 
-// canBackquote reports whether a raw literal holds the text unchanged.
-func canBackquote(text string) bool {
+// canBeRaw reports whether the text fits a raw string literal.
+func canBeRaw(text string) bool {
 	for _, r := range text {
 		if r == '`' || r == '\r' {
 			return false

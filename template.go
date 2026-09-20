@@ -8,18 +8,18 @@ import (
 	"strings"
 )
 
-// template is a parsed template file.
+// template is a parsed template.
 type template struct {
-	filename string
-	lines    []string
-	outputs  map[int]string
-	blocks   []span
-	funcs    []span
-	declared map[string]bool
-	builtins []builtin
+	filename     string
+	lines        []string
+	outputLines  map[int]string
+	blocks       []span
+	funcBodies   []span
+	declared     map[string]bool
+	builtinCalls []builtinCall
 }
 
-// newTemplate parses a template and rejects an output line outside a function body.
+// newTemplate parses a template and rejects misplaced output lines and GENSYM calls.
 func newTemplate(filename string, src []byte) (*template, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, src, parser.ParseComments|parser.SkipObjectResolution)
@@ -27,107 +27,110 @@ func newTemplate(filename string, src []byte) (*template, error) {
 		return nil, fmt.Errorf("%s: the template is not Go: %w", filename, err)
 	}
 	t := &template{
-		filename: filename,
-		lines:    splitLines(string(src)),
-		outputs:  map[int]string{},
-		blocks:   blockSpans(fset, file),
-		funcs:    funcSpans(fset, file),
-		declared: declaredNames(file),
-		builtins: builtinCalls(fset, file),
+		filename:     filename,
+		lines:        splitLines(string(src)),
+		outputLines:  map[int]string{},
+		blocks:       blockSpans(fset, file),
+		funcBodies:   funcBodySpans(fset, file),
+		declared:     declaredNames(file),
+		builtinCalls: findBuiltinCalls(fset, file),
+	}
+	if t.declared[gensymBuiltin] {
+		return nil, fmt.Errorf("%s: the template declares %s, which is a built-in function", filename, gensymBuiltin)
+	}
+	for _, c := range t.builtinCalls {
+		if t.funcBodyOf(c.line) == (span{}) {
+			return nil, fmt.Errorf("%s:%d: a %s call belongs inside a function body", filename, c.line, c.name)
+		}
 	}
 	for _, group := range file.Comments {
 		for _, c := range group.List {
-			text, ok := markText(c.Text)
+			text, ok := outputText(c.Text)
 			if !ok {
 				continue
 			}
 			at := fset.Position(c.Slash)
-			line := at.Line
-			if strings.TrimSpace(t.lines[line-1][:at.Column-1]) != "" {
-				return nil, fmt.Errorf("%s:%d: an output line stands alone on its line, and code precedes this one", filename, line)
+			if strings.TrimSpace(t.lines[at.Line-1][:at.Column-1]) != "" {
+				return nil, fmt.Errorf("%s:%d: an output line stands alone on its line, and code precedes this one", filename, at.Line)
 			}
-			if t.blockOf(line) == (span{}) {
-				return nil, fmt.Errorf("%s:%d: an output line belongs inside a function body", filename, line)
+			if t.funcBodyOf(at.Line) == (span{}) {
+				return nil, fmt.Errorf("%s:%d: an output line belongs inside a function body", filename, at.Line)
 			}
-			t.outputs[line] = text
+			t.outputLines[at.Line] = text
 		}
 	}
 	return t, nil
 }
 
-// builtin is one call to a built-in, with its 1-based position.
-type builtin struct {
+// builtinCall is one call to a built-in function, with its 1-based position.
+type builtinCall struct {
 	name     string
 	line     int
 	from, to int
 }
 
-// builtinsOn returns the built-in calls on one scaffolding line.
-func (t *template) builtinsOn(line int) []builtin {
-	var calls []builtin
-	for _, b := range t.builtins {
-		if b.line == line {
-			calls = append(calls, b)
+// gensymBuiltin is the name of the built-in function that returns a gensym.
+const gensymBuiltin = "GENSYM"
+
+// builtinCallsOn returns the calls to built-in functions on one line.
+func (t *template) builtinCallsOn(line int) []builtinCall {
+	var calls []builtinCall
+	for _, c := range t.builtinCalls {
+		if c.line == line {
+			calls = append(calls, c)
 		}
 	}
 	return calls
 }
 
-// gensym is the built-in that hands out a name of the generated program.
-const gensym = "GENSYM"
-
-// builtinCalls finds every call to a built-in in the scaffolding.
-func builtinCalls(fset *token.FileSet, file *ast.File) []builtin {
-	var calls []builtin
+// findBuiltinCalls finds every call to a built-in function in the file.
+func findBuiltinCalls(fset *token.FileSet, file *ast.File) []builtinCall {
+	var calls []builtinCall
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
 		id, ok := call.Fun.(*ast.Ident)
-		if !ok || id.Name != gensym {
+		if !ok || id.Name != gensymBuiltin {
 			return true
 		}
 		at := fset.Position(id.Pos())
-		calls = append(calls, builtin{name: id.Name, line: at.Line, from: at.Column, to: at.Column + len(id.Name)})
+		calls = append(calls, builtinCall{name: id.Name, line: at.Line, from: at.Column, to: at.Column + len(id.Name)})
 		return true
 	})
 	return calls
 }
 
-// span is the line range of a block, including both ends.
+// span is a range of lines that includes both ends.
 type span struct{ from, to int }
 
 // blockOf returns the innermost block that holds a line, or the zero span.
 func (t *template) blockOf(line int) span {
+	return innermost(t.blocks, line)
+}
+
+// funcBodyOf returns the innermost function body that holds a line, or the zero span.
+func (t *template) funcBodyOf(line int) span {
+	return innermost(t.funcBodies, line)
+}
+
+// innermost returns the smallest span that holds a line, or the zero span.
+func innermost(spans []span, line int) span {
 	var found span
-	for _, b := range t.blocks {
-		if b.from > line || line > b.to {
+	for _, s := range spans {
+		if s.from > line || line > s.to {
 			continue
 		}
-		if found == (span{}) || b.from >= found.from && b.to <= found.to {
-			found = b
+		if found == (span{}) || s.from >= found.from && s.to <= found.to {
+			found = s
 		}
 	}
 	return found
 }
 
-// funcOf returns the innermost function body that holds a line, or the zero span.
-func (t *template) funcOf(line int) span {
-	var found span
-	for _, f := range t.funcs {
-		if f.from > line || line > f.to {
-			continue
-		}
-		if found == (span{}) || f.from >= found.from && f.to <= found.to {
-			found = f
-		}
-	}
-	return found
-}
-
-// funcSpans returns the line range of every function body in the file.
-func funcSpans(fset *token.FileSet, file *ast.File) []span {
+// funcBodySpans returns the span of every function body in the file.
+func funcBodySpans(fset *token.FileSet, file *ast.File) []span {
 	var spans []span
 	add := func(body *ast.BlockStmt) {
 		if body != nil {
@@ -146,7 +149,7 @@ func funcSpans(fset *token.FileSet, file *ast.File) []span {
 	return spans
 }
 
-// blockSpans returns the line range of every block and case clause in the file.
+// blockSpans returns the span of every block, including switch and select clauses.
 func blockSpans(fset *token.FileSet, file *ast.File) []span {
 	var spans []span
 	add := func(from, to token.Pos) {
@@ -170,7 +173,7 @@ func blockSpans(fset *token.FileSet, file *ast.File) []span {
 	return spans
 }
 
-// declaredNames collects every name with a binding in the scaffolding.
+// declaredNames collects every name with a declaration in the template.
 func declaredNames(file *ast.File) map[string]bool {
 	names := map[string]bool{}
 	add := func(idents ...*ast.Ident) {

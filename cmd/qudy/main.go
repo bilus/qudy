@@ -1,4 +1,4 @@
-// Command qudy compiles a Go template into the generator that writes it.
+// Command qudy compiles a template into the Go source of its generator.
 package main
 
 import (
@@ -11,23 +11,23 @@ import (
 )
 
 func main() {
-	emit := flag.String("emit", "g.generate", "the call that writes a run of output lines")
-	scope := flag.String("scope", "", "the scope of fresh names, as variable,create,method; create is empty when the template declares the variable")
-	out := flag.String("o", "", "the file to write the generator to")
+	emit := flag.String("emit", "g.generate", "the emit function: the function of the generator that writes a run of output lines")
+	symbols := flag.String("symbols", "", "the symbol generator, as variable,create,method; create is empty when the template declares the variable")
+	out := flag.String("o", "", "the file for the generator")
 	flag.Parse()
 	if flag.NArg() != 1 || *out == "" {
-		fmt.Fprintln(os.Stderr, "usage: qudy [-emit call] [-scope variable,create,method] -o out.go template.go")
+		fmt.Fprintln(os.Stderr, "usage: qudy [-emit func] [-symbols variable,create,method] -o out.go template.go")
 		os.Exit(2)
 	}
-	if err := run(flag.Arg(0), *out, *emit, *scope); err != nil {
+	if err := compileFile(flag.Arg(0), *out, *emit, *symbols); err != nil {
 		fmt.Fprintln(os.Stderr, "qudy:", err)
 		os.Exit(1)
 	}
 }
 
-// run compiles one template and writes the generator under a generated-code header.
-func run(template, out, emit, scope string) error {
-	sc, err := parseScope(scope)
+// compileFile compiles one template and writes the generator after a Code generated comment.
+func compileFile(template, out, emit, symbolsFlag string) error {
+	symbols, err := parseSymbolGenerator(symbolsFlag)
 	if err != nil {
 		return err
 	}
@@ -35,7 +35,7 @@ func run(template, out, emit, scope string) error {
 	if err != nil {
 		return err
 	}
-	gen, err := qudy.Compile(template, src, emit, sc)
+	gen, err := qudy.Compile(template, src, emit, symbols)
 	if err != nil {
 		return err
 	}
@@ -43,14 +43,14 @@ func run(template, out, emit, scope string) error {
 	return os.WriteFile(out, append([]byte(header), gen...), 0o644)
 }
 
-// parseScope reads the -scope flag, empty for a template without fresh names.
-func parseScope(flag string) (qudy.Scope, error) {
+// parseSymbolGenerator parses the -symbols flag, empty for a template without gensyms.
+func parseSymbolGenerator(flag string) (qudy.SymbolGenerator, error) {
 	if flag == "" {
-		return qudy.Scope{}, nil
+		return qudy.SymbolGenerator{}, nil
 	}
 	parts := strings.Split(flag, ",")
 	if len(parts) != 3 {
-		return qudy.Scope{}, fmt.Errorf("-scope wants variable,create,method, got %q", flag)
+		return qudy.SymbolGenerator{}, fmt.Errorf("-symbols takes variable,create,method, got %q", flag)
 	}
-	return qudy.NewScope(parts[0], parts[1], parts[2]), nil
+	return qudy.NewSymbolGenerator(parts[0], parts[1], parts[2]), nil
 }

@@ -5,22 +5,22 @@ import (
 	"strings"
 )
 
-// interpolate reads an output line into a format, its arguments and its fresh names.
-func interpolate(line string) (string, []string, []string, error) {
-	var text strings.Builder
-	var args, names []string
+// scanOutputLine splits an output line into a format, its arguments and its gensyms.
+func scanOutputLine(line string) (string, []string, []string, error) {
+	var format strings.Builder
+	var args, gensyms []string
 	for i := 0; i < len(line); {
 		c := line[i]
 		if c == '%' {
-			text.WriteString("%%")
+			format.WriteString("%%")
 			i++
 			continue
 		}
 		if c == '#' {
 			if !strings.HasPrefix(line[i:], "##") {
-				return "", nil, nil, fmt.Errorf("a # marks a name of the generated program and follows one: %s", line[i:])
+				return "", nil, nil, fmt.Errorf("a # follows the name of a gensym, and ## writes a hash: %s", line[i:])
 			}
-			text.WriteByte('#')
+			format.WriteByte('#')
 			i += 2
 			continue
 		}
@@ -28,26 +28,26 @@ func interpolate(line string) (string, []string, []string, error) {
 			n := nameLen(line[i:])
 			if i+n < len(line) && line[i+n] == '#' && !strings.HasPrefix(line[i+n:], "##") {
 				args = append(args, line[i:i+n])
-				names = append(names, line[i:i+n])
-				text.WriteString("%s")
+				gensyms = append(gensyms, line[i:i+n])
+				format.WriteString("%s")
 				i += n + 1
 				continue
 			}
-			text.WriteString(line[i : i+n])
+			format.WriteString(line[i : i+n])
 			i += n
 			continue
 		}
 		if c != '~' {
-			text.WriteByte(c)
+			format.WriteByte(c)
 			i++
 			continue
 		}
 		rest := line[i+1:]
 		switch {
 		case strings.HasPrefix(rest, "//"):
-			return strings.TrimRight(text.String(), " \t"), args, names, nil
+			return strings.TrimRight(format.String(), " \t"), args, gensyms, nil
 		case strings.HasPrefix(rest, "~"):
-			text.WriteByte('~')
+			format.WriteByte('~')
 			i += 2
 		case strings.HasPrefix(rest, "{"):
 			n, err := bracedLen(rest)
@@ -55,30 +55,30 @@ func interpolate(line string) (string, []string, []string, error) {
 				return "", nil, nil, err
 			}
 			args = append(args, strings.TrimSpace(rest[1:n-1]))
-			text.WriteString("%s")
+			format.WriteString("%s")
 			i += 1 + n
 		default:
-			n, err := exprLen(rest)
+			n, err := selectorLen(rest)
 			if err != nil {
 				return "", nil, nil, err
 			}
 			args = append(args, rest[:n])
-			text.WriteString("%s")
+			format.WriteString("%s")
 			i += 1 + n
 		}
 	}
-	return text.String(), args, names, nil
+	return format.String(), args, gensyms, nil
 }
 
-// bracedLen measures a braced interpolation, skipping braces inside quotes.
+// bracedLen measures a braced interpolation and skips braces inside string and rune literals.
 func bracedLen(src string) (int, error) {
 	depth := 0
 	for i := 0; i < len(src); i++ {
 		switch c := src[i]; c {
 		case '"', '\'', '`':
-			n, ok := quotedLen(src[i:])
+			n, ok := literalLen(src[i:])
 			if !ok {
-				return 0, fmt.Errorf("an interpolation holds a quote that does not close: %s", src)
+				return 0, fmt.Errorf("a braced interpolation holds a string or rune literal without its closing quote: %s", src)
 			}
 			i += n - 1
 		case '{':
@@ -89,11 +89,11 @@ func bracedLen(src string) (int, error) {
 			}
 		}
 	}
-	return 0, fmt.Errorf("an interpolation opens with ~{ and does not close: %s", src)
+	return 0, fmt.Errorf("a braced interpolation has no closing brace: %s", src)
 }
 
-// quotedLen measures the quoted text at the start of src.
-func quotedLen(src string) (int, bool) {
+// literalLen measures the string or rune literal at the start of src.
+func literalLen(src string) (int, bool) {
 	quote := src[0]
 	for i := 1; i < len(src); i++ {
 		switch src[i] {
@@ -108,8 +108,8 @@ func quotedLen(src string) (int, bool) {
 	return 0, false
 }
 
-// exprLen measures the name path at the start of src.
-func exprLen(src string) (int, error) {
+// selectorLen measures the name and its selectors at the start of src.
+func selectorLen(src string) (int, error) {
 	if len(src) == 0 || !isNameStart(src[0]) {
 		return 0, fmt.Errorf("an interpolation starts with a name: ~%s", src)
 	}
@@ -124,7 +124,7 @@ func exprLen(src string) (int, error) {
 	return end, nil
 }
 
-// isNameStart reports whether a byte can open a name.
+// isNameStart reports whether a byte can start a name.
 func isNameStart(c byte) bool {
 	return c == '_' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
 }

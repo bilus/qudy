@@ -14,7 +14,7 @@ func TestCompileTheEntryTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := qudy.Compile("entry.go", src, "g.generate", qudy.NewScope("sc", "newScope()", "fresh"))
+	gen, err := qudy.Compile("entry.go", src, "g.generate", symbols)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,22 +22,22 @@ func TestCompileTheEntryTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(out) != string(want) {
-		t.Errorf("compiled to\n%s\nwant\n%s", out, want)
+	if string(gen) != string(want) {
+		t.Errorf("compiled to\n%s\nwant\n%s", gen, want)
 	}
 }
 
-// TestGofmtKeepsTheEntryTemplate checks that gofmt leaves the template unchanged, including its marks.
+// TestGofmtKeepsTheEntryTemplate checks that gofmt leaves the template unchanged, including its output lines.
 func TestGofmtKeepsTheEntryTemplate(t *testing.T) {
 	src, err := os.ReadFile("testdata/entry.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := format.Source(src)
+	formatted, err := format.Source(src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(out) != string(src) {
-		t.Errorf("gofmt changed the template:\n%s", out)
+	if string(formatted) != string(src) {
+		t.Errorf("gofmt changed the template:\n%s", formatted)
 	}
 }
