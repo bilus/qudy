@@ -179,6 +179,11 @@ The quick start runs qudy by hand. To run it with `go generate`, see
 
 ## Insert values into the output
 
+Output lines combine literal text, values inserted with `~`, and names generated
+with `#`:
+
+![Quasiquoting: literal text is copied, ~typ inserts Color, and both occurrences of value# become value_qd1.](docs/quasiquoting.svg)
+
 `~name` is an **interpolation**: qudy inserts the value of `name` there.
 For example, inside a template function:
 
