@@ -12,96 +12,134 @@ without a separate language for loops and expressions.
 The name stands for “quick and dirty quasiquoting”: quote the code you want to
 produce, and insert Go values where it varies.
 
-## Generate methods for a family of types
+## A stringer in one file
 
-Suppose your package defines an `Event` interface and several event types. Each
-type needs the same marker method:
+Suppose your package defines an enum, and you want the type to have a `String` method, printing the names of the constants. TODO
 
 ```go
-type Event interface {
-    isEvent()
-}
+type Color int
 
-type UserCreated struct{ ID string }
-type UserDeleted struct{ ID string }
+const (
+    Red Color = iota
+    Green
+    Blue
+)
 ```
 
-With qudy, a Go loop writes those methods. Save this template as
-`_template/events.go`:
+This template is the whole generator. Save it as `stringer/stringer.go`:
 
 ```go
+//go:build qudy
+
 package main
 
-import "fmt"
+import (
+    "fmt"
+    "os"
+)
 
 func main() {
-    //`package events
-    for _, name := range []string{"UserCreated", "UserDeleted"} {
-        //`func (~name) isEvent() {}
+    pkg, typ, names := os.Args[1], os.Args[2], os.Args[3:]
+    //`package ~pkg
+    //`
+    //`import "fmt"
+    //`
+    //`func (v# ~typ) String() string {
+    //`	switch v# {
+    for _, name := range names {
+        //`	case ~name:
+        //`		return "~name"
     }
+    //`	}
+    //`	return fmt.Sprintf("~typ(%d)", v#)
+    //`}
 }
 ```
 
-The loop runs in the generator. Each comment that starts with a backtick writes
-an **output line**, and `~name` inserts the current type name. Running the
-generator produces:
+The Go code runs in the generator. Each comment that starts with a backtick
+writes an **output line**, `~name` inserts a Go value, and the loop writes one
+`case` for each constant. `v#` writes a generated name, something like `v_qd1`,
+to avoid clashing with existing variables in the scope.
 
-```go
-package events
-func (UserCreated) isEvent() {}
-func (UserDeleted) isEvent() {}
-```
+See [examples/stringer](examples/stringer) for a slightly longer version.
 
 ## Run the example
 
-Install the command with Go 1.24 or later:
+Install the command with Go 1.25 or later:
 
 ```sh
 go install github.com/bilus/qudy/cmd/qudy@latest
 ```
 
-From the directory containing `_template`, compile the template, then run the
-resulting generator:
+Compile the template, then run the generator:
 
 ```sh
-qudy -emit fmt.Printf -o _template/events_gen.go _template/events.go
-go run _template/events_gen.go > events_gen.go
-gofmt -w events_gen.go
+qudy -emit fmt.Printf -o stringer/stringer_gen.go stringer/stringer.go
 ```
 
-Place `events_gen.go` alongside the `Event`, `UserCreated`, and `UserDeleted`
-definitions in package `events`.
-
-There are two steps because qudy produces the **generator's Go source**. Running
-that generator produces the code your application uses:
-
-```text
-_template/events.go → qudy → _template/events_gen.go → go run → events_gen.go
-     template                     generator                   generated code
-```
-
-qudy turns the template's output line into a call equivalent to:
+`color_string.go` now holds:
 
 ```go
-fmt.Printf("func (%s) isEvent() {}\n", name)
+package colors
+
+import "fmt"
+
+func (v_qd1 Color) String() string {
+	switch v_qd1 {
+	case Red:
+		return "Red"
+	case Green:
+		return "Green"
+	case Blue:
+		return "Blue"
+	}
+	return fmt.Sprintf("Color(%d)", v_qd1)
+}
+```
+
+To run the generated generator:
+
+``` text
+go run ./stringer colors Color Red Green Blue > color_string.go
+```
+
+TODO: Review the rest
+
+
+qudy turns the template's two output lines inside the loop into a call
+equivalent to:
+
+```go
+fmt.Printf("\tcase %s:\n\t\treturn \"%s\"\n", name, name)
 ```
 
 The `-emit` flag chooses that function; it defaults to `g.generate`. You can use
-an existing generator's method to write to a buffer or file. qudy combines
-consecutive output lines into one call, uses `%s` for inserted values, and escapes
-literal percent signs. Your emit function must accept a format string and its
+an existing generator's method to write to a buffer or file. qudy combines a
+**run** of consecutive output lines into one call, uses `%s` for inserted values, and escapes
+literal percent signs, which is why the template can say `%d`. Your emit function must accept a format string and its
 arguments and interpret them like `fmt.Printf`.
 
 A template parses as Go, so `gofmt` can format it and your editor can read it.
 It may not build as Go: variables used only in output lines look unused to the
-Go compiler. Keep templates in a directory such as `_template` or `testdata`,
-which the Go tool ignores when discovering packages.
+Go compiler. So start a template with `//go:build qudy`, and a normal build
+ignores it. qudy writes `//go:build !qudy` into the generator, so the two never
+build together. Name the generator after its template, with `_gen.go` in place
+of `.go`: `stringer.go` compiles to `stringer_gen.go`.
+
+To get completion and navigation inside a template, give your editor the tag,
+for example `-tags=qudy` in the `buildFlags` of gopls. It then loads the
+templates in place of the generators, and it reports a name that only output
+lines use as unused.
+
+The quick start runs qudy by hand. To run it with `go generate`, see
+[examples/stringer](examples/stringer).
 
 ## Insert values into the output
 
-Use `~name` for a variable and `~p.Type.Text` for a selector. Use braces for
-calls, indexes, or other Go expressions. Unbraced names use ASCII Go
-identifiers:
+`~name` is an **interpolation**: qudy inserts the value of `name` there. Use
+`~name` for a variable and `~p.Type.Text` for a selector. Use a **braced
+interpolation**, `~{expr}`, for calls, indexes, or other Go expressions. A name
+without braces is an ASCII Go identifier:
 
 ```go
 //`func (~name) ~method() {}
@@ -109,7 +147,7 @@ identifiers:
 //`var first = ~{values[0]}
 ```
 
-An unbraced interpolation stops before a bracket or parenthesis.
+An interpolation without braces stops before a bracket or parenthesis.
 For example, `~xs[0]` inserts `xs` followed by the literal text `[0]`.
 This lets you write expressions in the generated code without braces around
 every inserted name.
@@ -117,12 +155,14 @@ every inserted name.
 qudy formats each inserted value with `%s`. Convert other values to strings in
 the template when needed, for example with `~{strconv.Itoa(count)}`.
 
-## Control lines and comments
+## Output lines and comments
 
 An output line must be a comment on its own line inside a function body.
 Both `` //`text `` and the spelling that `gofmt` produces, `` // `text ``, work.
-qudy preserves the template's other Go code, apart from the symbol handling
-described below, and formats the generator with `go/format`.
+qudy copies the template's other Go code into the generator, with three
+exceptions: it negates the `qudy` build tag, it leaves out `go:generate` lines,
+and it handles gensyms as described below. It formats the generator with
+`go/format`.
 
 Each output line writes a trailing newline. End it with a backslash to continue
 on the same line, for example when a loop writes an argument list:
@@ -166,27 +206,25 @@ used in the output. Write `name#` to request such a name, often called a
 //`}
 ```
 
-The first use of `errName#` in a template block declares a variable in the
-generator, equivalent to `errName := GENSYM("errName")`. Later uses in that
-scope insert the same name. qudy rejects a declaration that would shadow a
+The first use of `errName#` in a block declares a variable in the generator,
+equivalent to `errName := GENSYM("errName")`. Later uses in that block insert
+the same name. qudy rejects a declaration that would shadow a
 variable in the template.
 
-You supply the symbol generator that chooses these names. It must track names
-already taken in the generated code and return a fresh name on each call.
-Configure it with three comma-separated values:
+qudy supplies the symbol generator. It declares `qudyGensym`, a small function
+value, at the start of each function that uses a gensym, so the generator stays
+one self-contained file. Each gensym gets a numbered suffix, so `errName#` comes
+out as `errName_qd1`, which is unlikely to collide with a name in your code.
 
-```sh
-qudy -symbols 'symbols,newSymbolGenerator(),gensym' \
-    -o writer_gen.go _template/writer.go
+To choose the names yourself, declare `qudyGensym` in the template, as a local
+variable, a parameter, or a package-level variable. It is a
+`func(want string) string`. qudy then uses yours and declares none:
+
+```go
+qudyGensym := newSeededGensym(taken)
 ```
 
-Here, `symbols` names the variable, `newSymbolGenerator()` creates it, and
-`gensym` names its method. qudy adds `symbols := newSymbolGenerator()` at the
-start of each function body that needs it, unless the template already declares
-`symbols`. You provide the constructor and method in your generator's package.
-
-If the template declares the symbol generator itself, leave the constructor
-empty: `-symbols symbols,,gensym`.
+A function literal shares the symbol generator of the function around it.
 
 Call `GENSYM(want)` directly inside a function body when you compute the desired
 name or need to declare the variable yourself:
@@ -196,23 +234,20 @@ local := GENSYM(param.Name)
 //`var ~local ~param.Type.Text
 ```
 
-qudy rewrites `GENSYM` to the configured method. A template that uses no gensyms
-does not need `-symbols`.
+qudy rewrites `GENSYM` to `qudyGensym`.
+
+## Generate several files
+
+TODO: describe `qudy -txtar`, show a trivial example, and refer to
+`examples/enums`.
 
 ## Use qudy as a library
 
 Call `qudy.Compile` when you want to compile templates from your own Go program:
 
 ```go
-generator, err := qudy.Compile(
-    "_template/events.go",
-    src,
-    "fmt.Printf",
-    qudy.SymbolGenerator{},
-)
+generator, err := qudy.Compile("stringer/stringer.go", src, "fmt.Printf")
 ```
 
 Import `github.com/bilus/qudy` and pass the template as `src []byte`.
-`Compile` returns formatted Go source and an error. Use
-`qudy.NewSymbolGenerator(variable, create, method)` instead of the zero value
-when the template needs gensyms.
+`Compile` returns the generator's formatted Go source and an error.
