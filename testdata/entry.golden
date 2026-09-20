@@ -1,0 +1,74 @@
+package generator
+
+// generateDispatchEntry writes the table's entry for one handler, on the
+// receiver or on the nested instance the steps lead to.
+func (g *liveGenerator) generateDispatchEntry(name string, steps []navStep, recv string, h handlerBinding) {
+	sc := newScope()
+	params := valueParams(h.sig)
+	event := "_"
+	if len(params) > 0 || h.fill != "" {
+		event = sc.fresh("e")
+	}
+	var locals []string
+	g.generate(`%s: func(lv live.Ctx, %s live.Event) error {
+`, strconv.Quote(name), event)
+	for _, p := range params {
+		local := sc.fresh(p.Name)
+		locals = append(locals, local)
+		errName := sc.fresh("errName")
+		g.generate(`%s, %s := live.Param[%s](%s, %s)
+if %s != nil {
+	return %s
+}
+`, local, errName, p.Type.Text, event, strconv.Quote(p.Name), errName, errName)
+	}
+	for i, s := range steps {
+		if i > 0 {
+			g.generate(`{
+`)
+		}
+		g.generate(`%s := %s
+`, s.param, s.state)
+		recv = s.param
+	}
+	fill, callee := h.fill, h.method
+	if h.field != "" {
+		callee = h.field + "." + h.method
+	}
+	if fill != "" {
+		decodeErr := sc.fresh("decodeErr")
+		ruleErr := sc.fresh("ruleErr")
+		g.generate(`if %s := form.Decode(&%s.%s, %s); %s != nil {
+	return %s
+}
+if %s := form.Validate(&%s.%s); %s != nil {
+	return %s
+}
+return form.Update(&%s.%s, func() {
+`, decodeErr, recv, fill, event, decodeErr, decodeErr, ruleErr, recv, fill, ruleErr, ruleErr, recv, fill)
+	}
+	g.generate(`%s.%s(lv`, recv, callee)
+	for _, s := range steps {
+		if s.id != "" {
+			g.generate(`.WithID(%s)`, strconv.Quote(s.id))
+		}
+	}
+	for _, local := range locals {
+		g.generate(`, %s`, local)
+	}
+	g.generate(`)
+`)
+	if fill != "" {
+		g.generate(`})
+`)
+	} else {
+		g.generate(`return nil
+`)
+	}
+	for range max(len(steps)-1, 0) {
+		g.generate(`}
+`)
+	}
+	g.generate(`},
+`)
+}

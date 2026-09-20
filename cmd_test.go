@@ -1,0 +1,43 @@
+package qudy_test
+
+import (
+	"go/format"
+	"os"
+	"testing"
+
+	"github.com/bilus/qudy"
+)
+
+// TestCompileTheEntryTemplate compiles livegen's dispatch entry against its golden file.
+func TestCompileTheEntryTemplate(t *testing.T) {
+	src, err := os.ReadFile("testdata/entry.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := qudy.Compile("entry.go", src, "g.generate", qudy.NewScope("sc", "newScope()", "fresh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/entry.golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(want) {
+		t.Errorf("compiled to\n%s\nwant\n%s", out, want)
+	}
+}
+
+// TestGofmtKeepsTheEntryTemplate checks that gofmt leaves the template unchanged, including its marks.
+func TestGofmtKeepsTheEntryTemplate(t *testing.T) {
+	src, err := os.ReadFile("testdata/entry.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := format.Source(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(src) {
+		t.Errorf("gofmt changed the template:\n%s", out)
+	}
+}
