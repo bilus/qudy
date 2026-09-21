@@ -1,14 +1,14 @@
 (package main)
 (import "fmt")
 
-; Return types go on defn names; parameter types go on parameter names.
-(defn ^int64 factorial [^int64 n]
+; Return types go before parameter vectors; parameter types go before parameter names.
+(defn factorial ^int64 [^int64 n]
   (if (<= n 1) 1 (* n (factorial (- n 1)))))
 
-(defn ^string greeting [^string name]
+(defn greeting ^string [^string name]
   (let [prefix "Hello "] (+ prefix name)))
 
-(defn ^float64 half [^float64 x] (/ x 2.0))
+(defn half ^float64 [^float64 x] (/ x 2.0))
 
 (defn main []
   ; fn return types go on their parameter vectors.

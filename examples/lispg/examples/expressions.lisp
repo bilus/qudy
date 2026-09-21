@@ -1,16 +1,16 @@
 (package main)
 (import "fmt")
 
-(defn ^int64 maybe [^bool enabled]
+(defn maybe ^int64 [^bool enabled]
   (when enabled
     (fmt.Print "body ")
     (let [x 20] (* x 2))))
 
-(defn ^string label [^bool enabled] (when enabled "yes"))
-(defn ^float64 amount [^bool enabled] (when enabled 1.5))
-(defn ^bool active [^bool enabled] (when enabled true))
+(defn label ^string [^bool enabled] (when enabled "yes"))
+(defn amount ^float64 [^bool enabled] (when enabled 1.5))
+(defn active ^bool [^bool enabled] (when enabled true))
 
-(defn ^bool condition [] (fmt.Println "condition") true)
+(defn condition ^bool [] (fmt.Println "condition") true)
 
 (defn main []
   (fmt.Println (maybe true))

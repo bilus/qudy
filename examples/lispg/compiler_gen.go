@@ -37,9 +37,8 @@ func read(s *scanner.Scanner, t rune) form {
 	f := form{atom: s.TokenText(), pos: s.Position}
 	if t == '^' {
 		hint := read(s, s.Scan())
-		need(hint, hint.delim == 0, "expected a type after ^")
 		f = read(s, s.Scan())
-		f.hint = hint.atom
+		f.hint = typeName(hint)
 		return f
 	}
 	need(f, t != scanner.EOF && t != ')' && t != ']', "unexpected end or closing delimiter")
@@ -64,13 +63,39 @@ func read(s *scanner.Scanner, t rune) form {
 }
 
 func ident(f form) string {
-	need(f, f.delim == 0 && f.atom != "_" && token.IsIdentifier(f.atom), "expected a Go identifier")
-	return f.atom
+	name := f.atom
+	need(f, !strings.HasPrefix(name, "_lispg"), "_lispg is reserved for generated names")
+	if token.Lookup(name).IsKeyword() {
+		name = "_lispg_" + name
+	}
+	need(f, f.delim == 0 && name != "_" && token.IsIdentifier(name), "expected an identifier")
+	return name
 }
 
 func typ(f form, t string) string {
-	need(f, t == "int64" || t == "float64" || t == "string" || t == "bool", "type must be int64, float64, string or bool")
+	need(f, t != "", "expected a type hint")
 	return t
+}
+
+func typeName(f form) string {
+	if f.delim == '[' {
+		arity(f, f.kids, 1, 1)
+		return "[]" + typeName(f.kids[0])
+	}
+	if f.delim == '(' {
+		head, args := parts(f)
+		arity(f, args, 2, 2)
+		need(f, head == "fn" && args[0].delim == '[', "expected (fn [argument types] result type)")
+		var params []string
+		for _, p := range args[0].kids {
+			params = append(params, typeName(p))
+		}
+		return "func(" + strings.Join(params, ", ") + ") " + typeName(args[1])
+	}
+	name := strings.Split(f.atom, ".")
+	qualified := len(name) == 2 && token.IsIdentifier(name[0]) && token.IsIdentifier(name[1])
+	need(f, qualified || f.atom == "error" || f.atom == "int64" || f.atom == "float64" || f.atom == "string" || f.atom == "bool", "unknown type")
+	return f.atom
 }
 
 func parts(f form) (string, []form) {
@@ -103,10 +128,11 @@ func atom(f form) {
 		need(f, err == nil, "invalid float64 literal")
 		emit(`float64(%v)`, s)
 	} else {
-		for _, p := range strings.Split(s, ".") {
-			ident(form{atom: p, pos: f.pos})
+		segments := strings.Split(s, ".")
+		for i, p := range segments {
+			segments[i] = ident(form{atom: p, pos: f.pos})
 		}
-		emit(`%v`, s)
+		emit(`%v`, strings.Join(segments, "."))
 	}
 }
 
@@ -123,6 +149,10 @@ func expr(f form, want string) {
 	}
 	if f.delim == 0 {
 		atom(f)
+		return
+	}
+	if f.delim == '[' {
+		listExpr(f, want)
 		return
 	}
 	head, args := parts(f)
@@ -143,16 +173,53 @@ func expr(f form, want string) {
 	case "+", "-", "*", "/", "%", "=", "not=", "<", "<=", ">", ">=", "and", "or", "not":
 		operator(f, head, args, want)
 	default:
-		expr(f.kids[0], "")
+		helper := map[string]string{"first": "First", "rest": "Rest", "empty?": "Empty", "cons": "Cons"}[head]
+		if helper != "" {
+			n := 1
+			if head == "cons" {
+				n = 2
+			}
+			arity(f, args, n, n)
+			emit(`_lispg%v`, helper)
+		} else {
+			expr(f.kids[0], "")
+		}
 		emit(`(`)
 		for i, a := range args {
 			if i > 0 {
 				emit(`, `)
 			}
-			expr(a, "")
+			t := ""
+			if head == "rest" || head == "cons" {
+				t = want
+			}
+			if head == "first" && want != "" {
+				t = "[]" + want
+			}
+			if head == "cons" && i == 0 {
+				t = strings.TrimPrefix(t, "[]")
+			}
+			expr(a, t)
 		}
 		emit(`)`)
 	}
+}
+
+func listExpr(f form, want string) {
+	need(f, want == "" || strings.HasPrefix(want, "[]"), "expected a list type")
+	need(f, want != "" || len(f.kids) > 0, "empty list needs a type hint or context")
+	elem, suffix := "", ""
+	if want != "" {
+		elem, suffix = strings.TrimPrefix(want, "[]"), "["+strings.TrimPrefix(want, "[]")+"]"
+	}
+	emit(`_lispgList%v(`, suffix)
+	for i, item := range f.kids {
+		if i > 0 {
+			emit(`, `)
+		}
+		expr(item, elem)
+	}
+	emit(`)`)
 }
 
 func operator(f form, op string, args []form, want string) {
@@ -231,9 +298,8 @@ func body(forms []form, result string) {
 // An absent branch or empty body yields the result type's zero value.
 func zero(result string) {
 	if result != "" {
-		value := map[string]string{"int64": "0", "float64": "0", "string": "\"\"", "bool": "false"}[result]
-		emit(`return %v
-`, value)
+		emit(`var _lispgZero %v; return _lispgZero
+`, result)
 	}
 }
 
@@ -353,10 +419,8 @@ func namespaceExpr(f form, stage *int) {
 		arity(f, args, 3, len(args))
 		need(f, *stage > 0, "package must come first")
 		*stage = 2
-		name, result := ident(args[0]), args[0].hint
-		if result != "" {
-			typ(args[0], result)
-		}
+		need(args[0], args[0].hint == "", "put the return type hint before the parameter vector")
+		name, result := ident(args[0]), args[1].hint
 		emit(`func %v`, name)
 		parameters(args[1], result)
 		body(args[2:], result)
@@ -408,4 +472,10 @@ func main() {
 	if stage == 0 {
 		panic(fmt.Errorf("missing package form"))
 	}
+	emit(`func _lispgList[T any](xs ...T) []T { return xs }
+func _lispgFirst[T any](xs []T) T { return xs[0] }
+func _lispgRest[T any](xs []T) []T { if len(xs) == 0 { return xs }; return xs[1:] }
+func _lispgEmpty[T any](xs []T) bool { return len(xs) == 0 }
+func _lispgCons[T any](x T, xs []T) []T { return append([]T{x}, xs...) }
+`)
 }

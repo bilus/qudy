@@ -1,9 +1,9 @@
 (package main)
 (import "fmt")
 
-(defn ^[string] words [] ["hello" "world"])
-(defn ^[float64] missing [] (when false [1.5]))
-(defn ^(fn [int64] int64) incrementer [] (fn ^int64 [^int64 x] (+ x 1)))
+(defn words ^[string] [] ["hello" "world"])
+(defn missing ^[float64] [] (when false [1.5]))
+(defn incrementer ^(fn [int64] int64) [] (fn ^int64 [^int64 x] (+ x 1)))
 
 (defn main []
   (fmt.Println (first [1 2]) (rest [1 2]) (empty? ^[int64] []))

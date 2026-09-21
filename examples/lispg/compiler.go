@@ -92,7 +92,9 @@ func typeName(f form) string {
 		}
 		return "func(" + strings.Join(params, ", ") + ") " + typeName(args[1])
 	}
-	need(f, f.atom == "int64" || f.atom == "float64" || f.atom == "string" || f.atom == "bool", "unknown type")
+	name := strings.Split(f.atom, ".")
+	qualified := len(name) == 2 && token.IsIdentifier(name[0]) && token.IsIdentifier(name[1])
+	need(f, qualified || f.atom == "error" || f.atom == "int64" || f.atom == "float64" || f.atom == "string" || f.atom == "bool", "unknown type")
 	return f.atom
 }
 
@@ -293,11 +295,7 @@ func body(forms []form, result string) {
 // An absent branch or empty body yields the result type's zero value.
 func zero(result string) {
 	if result != "" {
-		value := map[string]string{"int64": "0", "float64": "0", "string": "\"\"", "bool": "false"}[result]
-		if value == "" {
-			value = "nil"
-		}
-		//`return ~value
+		//`var _lispgZero ~result; return _lispgZero
 	}
 }
 
@@ -403,10 +401,8 @@ func namespaceExpr(f form, stage *int) {
 		arity(f, args, 3, len(args))
 		need(f, *stage > 0, "package must come first")
 		*stage = 2
-		name, result := ident(args[0]), args[0].hint
-		if result != "" {
-			typ(args[0], result)
-		}
+		need(args[0], args[0].hint == "", "put the return type hint before the parameter vector")
+		name, result := ident(args[0]), args[1].hint
 		//`func ~name\
 		parameters(args[1], result)
 		body(args[2:], result)

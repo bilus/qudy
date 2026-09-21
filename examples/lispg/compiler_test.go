@@ -38,9 +38,55 @@ func TestPrograms(t *testing.T) {
 		})
 	}
 
+	t.Run("directory tree", func(t *testing.T) {
+		generated, err := exec.Command(binary, "examples/tree.lisp").Output()
+		if err != nil {
+			t.Fatalf("transpile tree: %v", err)
+		}
+		dir := t.TempDir()
+		path, program := filepath.Join(dir, "main.go"), filepath.Join(dir, "tree")
+		if err := os.WriteFile(path, generated, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("go", "build", "-o", program, path).CombinedOutput(); err != nil {
+			t.Fatalf("build tree: %v\n%s\n%s", err, out, generated)
+		}
+		root := filepath.Join(dir, "fixture")
+		for _, name := range []string{"sub/deeper", "zempty"} {
+			if err := os.MkdirAll(filepath.Join(root, name), 0700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for name, data := range map[string]string{"a.txt": "abc", "sub/b.bin": "12345", "sub/deeper/c.bin": "1234567"} {
+			if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		linkLine := ""
+		if err := os.Symlink(filepath.Join(root, "sub"), filepath.Join(root, "link")); err == nil {
+			linkLine = "  link (not counted)\n"
+		}
+		tail := " (15 B)\n  a.txt (3 B)\n" + linkLine + "  sub/ (12 B)\n    b.bin (5 B)\n    deeper/ (7 B)\n      c.bin (7 B)\n  zempty/ (0 B)\n"
+		cmd := exec.Command(program, root+string(os.PathSeparator))
+		if out, err := cmd.CombinedOutput(); err != nil || string(out) != "fixture/"+tail {
+			t.Fatalf("tree: %v\n%s", err, out)
+		}
+		cmd = exec.Command(program)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil || string(out) != "./"+tail {
+			t.Fatalf("default root: %v\n%s", err, out)
+		}
+		for _, name := range []string{"missing", "a.txt"} {
+			out, err := exec.Command(program, filepath.Join(root, name)).CombinedOutput()
+			if err == nil || !strings.Contains(string(out), name) || strings.Contains(string(out), "panic:") {
+				t.Fatalf("expected a reported walk error for %s: %v\n%s", name, err, out)
+			}
+		}
+	})
+
 	t.Run("semantics", func(t *testing.T) {
 		source := `(package main) (import "fmt")
-(defn ^int64 choose [^bool b] (let [x 40] (if b (+ x 2) 0)))
+(defn choose ^int64 [^bool b] (let [x 40] (if b (+ x 2) 0)))
 (defn main []
   (let [x 5 x (+ x 1) unused 99] (fmt.Println x))
   (let [x 7] (let [x (+ x 1)] (fmt.Println x)) (fmt.Println x))
@@ -76,7 +122,7 @@ func TestPrograms(t *testing.T) {
 		"(defn main [] 1)", "(package main) (defn main [] (let [x] 1))",
 		"(package main) (defn main [] (if true))",
 		"(package main) (defn f [x] x)",
-		"(package main) (defn ^bogus f [] 1)",
+		"(package main) (defn f ^bogus [] 1)",
 		"(package main) (defn main [] (let [^bogus x 1] x))",
 		"(package main) (defn main [] (fmt.Println (if true 1 2)))",
 		"(package main) (defn main [] (when))",
@@ -89,14 +135,16 @@ func TestPrograms(t *testing.T) {
 		"(package main) (defn main [] 1) (import \"fmt\")",
 		"(package main) (defn main [] \"unterminated)",
 		"(package main) (defn main [] [])",
-		"(package main) (defn ^[bogus] f [] [])",
-		"(package main) (defn ^[] f [] [])",
-		"(package main) (defn ^[int64 string] f [] [])",
+		"(package main) (defn f ^[bogus] [] [])",
+		"(package main) (defn f ^[] [] [])",
+		"(package main) (defn f ^[int64 string] [] [])",
 		"(package main) (defn main [^(fn int64 int64) f] 1)",
 		"(package main) (defn main [] (first))",
 		"(package main) (defn main [] (rest [1] [2]))",
 		"(package main) (defn main [] (cons 1))",
 		"(package main) (defn _lispgList [] 1)",
+		"(package main) (defn ^int64 f [] 1)",
+		"(package main) (defn f ^fs.bad.name [] nil)",
 	} {
 		t.Run("reject:"+source, func(t *testing.T) {
 			cmd := exec.Command(binary)

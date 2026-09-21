@@ -50,21 +50,19 @@ when producing a library. Imports are preserved; Go reports unused imports.
 | `= not= < <= > >=`                           | Binary comparisons.                                                                  |
 | `and or not`                                 | Boolean operations; `and` and `or` short-circuit.                                    |
 
-Only `package`, `import`, and `defn` can appear at top level, and those forms
-cannot appear inside other expressions. The compiler handles them in
-`namespaceExpr`. All local forms are expressions. `discardExpr` evaluates an
-expression when its result is unused; `let`, `if`, and `when` retain the same
-meaning in either context. An empty body yields the result type's zero value.
-
-Function arguments require types. Function results default to no result. Use
-`int64`, `float64`, `string`, or `bool`; booleans provide conditions. Integer
+Return-type hints go immediately before the parameter vector for both `defn`
+and `fn`. A hint on a `defn` name is rejected. Function arguments require
+types. Function results default to no result. Use
+`int64`, `float64`, `string`, or `bool`; booleans provide conditions. Go interop
+also accepts `error` and qualified type names such as `fs.FileInfo` and
+`io.Writer`. The Go compiler checks those names against the imports. Integer
 literals emit `int64(...)`, floating literals emit `float64(...)`. Strings use
 Go-compatible double-quoted escapes. Semicolons start comments; commas are
 whitespace. Names use Go identifier syntax; qualified calls use dots. Go keywords
 such as `map` are renamed in generated code. The `_lispg` prefix is reserved.
 
 ```clojure
-(defn ^int64 factorial [^int64 n]
+(defn factorial ^int64 [^int64 n]
   (if (<= n 1) 1 (* n (factorial (- n 1)))))
 
 (let [x 10 add (fn ^int64 [^int64 y] (+ x y))]
@@ -108,7 +106,7 @@ For an empty list, supply a hint or a known result/binding type:
 ```clojure
 ^[int64] []
 (let [^[string] names []] (empty? names))
-(defn ^[int64] numbers [] [])
+(defn numbers ^[int64] [] [])
 ```
 
 Hints describe types with the same reader forms as ordinary code:
@@ -124,7 +122,7 @@ Function type hints require one result type. Parameters and results can
 also be lists or functions. For example, `map` takes a typed function:
 
 ```clojure
-(defn ^[int64] map [^(fn [int64] int64) f ^[int64] xs]
+(defn map ^[int64] [^(fn [int64] int64) f ^[int64] xs]
   (if (empty? xs)
     []
     (cons (f (first xs)) (map f (rest xs)))))
