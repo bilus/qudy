@@ -18,6 +18,8 @@ func TestPrograms(t *testing.T) {
 		{"hello.lisp", "Hello JOHN (10)\n"},
 		{"features.lisp", "15\n120 Hello John 2.5\nyes\n16\nwhen\nelse\n"},
 		{"expressions.lisp", "body 40\n0\n\"yes\" \"\"\n1.5 0\ntrue false\nlet 42\n8 12\n0 0 0 0\ncondition\n5\n"},
+		{"lists.lisp", "map: [1 4 9 16]\nreduce: 10\nfilter: [2 4]\noriginal: [1 2 3 4]\nempty: [] 10 []\nclosure: [11 12 13]\n"},
+		{"list_types.lisp", "1 [2] true\n[]int64 []float64 []string []bool\n[hi hello world] [1.5 2.5]\n[] []\ntrue\n[] 5\n[[1 2] []]\n[7 8]\n[1 2 3] [2 3] [9 2 3] [8 2 3]\n[1]\n"},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
 			cmd := exec.Command(binary, filepath.Join("examples", tc.file))
@@ -86,6 +88,15 @@ func TestPrograms(t *testing.T) {
 		"(package main) (defn f [^int64 x ^int64 x] x)",
 		"(package main) (defn main [] 1) (import \"fmt\")",
 		"(package main) (defn main [] \"unterminated)",
+		"(package main) (defn main [] [])",
+		"(package main) (defn ^[bogus] f [] [])",
+		"(package main) (defn ^[] f [] [])",
+		"(package main) (defn ^[int64 string] f [] [])",
+		"(package main) (defn main [^(fn int64 int64) f] 1)",
+		"(package main) (defn main [] (first))",
+		"(package main) (defn main [] (rest [1] [2]))",
+		"(package main) (defn main [] (cons 1))",
+		"(package main) (defn _lispgList [] 1)",
 	} {
 		t.Run("reject:"+source, func(t *testing.T) {
 			cmd := exec.Command(binary)
@@ -93,6 +104,33 @@ func TestPrograms(t *testing.T) {
 			out, err := cmd.CombinedOutput()
 			if err == nil || !strings.Contains(string(out), "lispg:") {
 				t.Fatalf("wanted error, got %v: %s", err, out)
+			}
+		})
+	}
+	// Go must reject heterogeneous lists and incompatible higher-order arguments.
+	for _, tc := range []struct{ body, diagnostic string }{
+		{`(let [xs [1 "x"]] xs)`, "string"},
+		{`(let [xs [1 2.5]] xs)`, "float64"},
+		{`(let [^[int64] xs ["x"]] xs)`, "string"},
+		{`(cons "x" [1 2])`, "string"},
+		{`(first 1)`, "[]"},
+		{`((fn ^int64 [^(fn [int64] int64) f] (f 1)) (fn ^string [^int64 x] "x"))`, "func"},
+	} {
+		t.Run("type error:"+tc.body, func(t *testing.T) {
+			cmd := exec.Command(binary)
+			cmd.Stdin = strings.NewReader("(package main) (defn main [] " + tc.body + ")")
+			generated, err := cmd.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			path := filepath.Join(dir, "main.go")
+			if err := os.WriteFile(path, generated, 0600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.Command("go", "build", "-o", filepath.Join(dir, "program"), path).CombinedOutput()
+			if err == nil || !strings.Contains(string(out), tc.diagnostic) {
+				t.Fatalf("wanted %q type error, got %v: %s", tc.diagnostic, err, out)
 			}
 		})
 	}
