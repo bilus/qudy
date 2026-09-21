@@ -91,6 +91,36 @@ func TestSplicesAndQuotesAtRunTime(t *testing.T) {
 	}
 }
 
+// stringers inserts values with a String method on a value or pointer receiver.
+var stringers = strings.Join([]string{
+	"package main",
+	"",
+	"type color int",
+	"",
+	`func (c color) String() string { return [...]string{"red", "green"}[c] }`,
+	"",
+	"type tag struct{ name string }",
+	"",
+	`func (t *tag) String() string { return "<" + t.name + ">" }`,
+	"",
+	"func main() {",
+	"	c := color(1)",
+	"	colors := []color{0, 1}",
+	`	values := []tag{{"p"}}`,
+	`	pointers := []*tag{{"p"}}`,
+	"	//`~c ~\"c ~@\"colors",
+	"	//`~@\"values ~@\"pointers",
+	"}",
+	"",
+}, "\n")
+
+func TestInterpolationsUseAStringMethod(t *testing.T) {
+	got := runWithRuntime(t, "fmt.Printf", map[string]string{"main.go": stringers}, nil)
+	if want := "green \"green\" \"red\", \"green\"\n\"{p}\" \"<p>\"\n"; got != want {
+		t.Errorf("the generator wrote\n%s\nwant\n%s", got, want)
+	}
+}
+
 func TestCompileImportsFmtForAQuote(t *testing.T) {
 	gen := compile(t, template(`//`+"`"+`x := ~"name`))
 	if !strings.Contains(gen, `import "fmt"`) {

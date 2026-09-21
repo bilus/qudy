@@ -308,6 +308,12 @@ var tags = []string{"<p>", "say \"hi\""}
 An empty slice inserts nothing, and `~@{expr}` takes any expression. For another
 separator, join the elements yourself, as in `~{strings.Join(xs, " | ")}`.
 
+Every interpolation formats its value with `fmt`, so a value with a `String`
+method, or an `error`, inserts the text of that method, with or without quotes.
+One case gives a surprising result. A splice ranges over the slice by value, so
+with a `String` method on a pointer receiver, the elements of a `[]Tag` come out
+as structs, such as `{p}`. Give `String` a value receiver, or splice a `[]*Tag`.
+
 ## Output lines and comments
 
 An output line must be a comment on its own line inside a function body.
