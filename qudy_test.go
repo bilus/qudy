@@ -81,13 +81,13 @@ func TestCompileWritesTheEmitCalls(t *testing.T) {
 			"g.generate(`// 50%% done\n`)",
 		},
 		{
-			"a GENSYM call becomes a call to the symbol generator",
-			template(`x := GENSYM("e")`, "_ = x"),
+			"a qudyGensym call stays as written, above the symbol generator's declaration",
+			template(`x := qudyGensym("e")`, "_ = x"),
 			"x := qudyGensym(\"e\")",
 		},
 		{
-			"two GENSYM calls on one line both become calls to the symbol generator",
-			template(`a, b := GENSYM("x"), GENSYM(p.Name)`, "_, _ = a, b"),
+			"two qudyGensym calls on one line stay as written",
+			template(`a, b := qudyGensym("x"), qudyGensym(p.Name)`, "_, _ = a, b"),
 			`a, b := qudyGensym("x"), qudyGensym(p.Name)`,
 		},
 		{
@@ -194,6 +194,14 @@ func TestTwoCompiledGeneratorsBuildInOnePackage(t *testing.T) {
 	vet.Dir = dir
 	if out, err := vet.CombinedOutput(); err != nil {
 		t.Fatalf("the two generators do not build together: %v\n%s", err, out)
+	}
+}
+
+func TestCompileDeclaresTheSymbolGeneratorForADirectCall(t *testing.T) {
+	gen := compile(t, template(`x := qudyGensym("e")`, "_ = x"))
+	declared, called := strings.Index(gen, builtin), strings.Index(gen, `x := qudyGensym("e")`)
+	if declared < 0 || called < declared {
+		t.Errorf("the generator calls qudyGensym without a declaration above the call:\n%s", gen)
 	}
 }
 
@@ -356,8 +364,8 @@ func TestCompileRejects(t *testing.T) {
 		{"an output line outside a function body", "package p\n\n//`x := 1\nvar y = 1\n", "belongs inside a function body"},
 		{"a doc comment that opens with a backtick", "package p\n\n// `x` is a name\nfunc f() {}\n", "belongs inside a function body"},
 		{"a template with a name that ends in the reserved suffix", "package p\n\nfunc f() {\n\terr_qd := 1\n\t_ = err_qd\n}\n", "qudy reserves names that end in _qd"},
-		{"a template that declares GENSYM", "package p\n\nfunc GENSYM(s string) string { return s }\n", "which is a built-in function"},
-		{"a GENSYM call outside a function body", "package p\n\nvar x = GENSYM(\"x\")\n", "a GENSYM call belongs inside a function body"},
+		{"a call of the former name of qudyGensym", template(`x := GENSYM("e")`, "_ = x"), "test.go:4: GENSYM is called qudyGensym now"},
+		{"a qudyGensym call outside a function body", "package p\n\nvar x = qudyGensym(\"x\")\n", "test.go:3: a qudyGensym call outside a function body needs -runtime"},
 	} {
 		t.Run(c.description, func(t *testing.T) {
 			_, err := qudy.Compile("test.go", []byte(c.template), "g.generate")

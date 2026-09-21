@@ -308,7 +308,7 @@ A generator often needs its own local names in the code it produces. Write
 ```
 
 The first use of `errName#` in a block declares a variable in the generator,
-equivalent to `errName_qd := GENSYM("errName")`. Later uses in that block insert
+equivalent to `errName_qd := qudyGensym("errName")`. Later uses in that block insert
 the same name.
 
 `errName#` never collides with a variable of the template. qudy keeps the
@@ -317,11 +317,11 @@ gensym in a generator variable of its own, `errName_qd`, so `errName#` and
 reason a template may not declare a name that ends in `_qd`.
 
 `name#` belongs in output lines. When the template's Go code needs the gensym,
-call `GENSYM`, as shown below.
+call `qudyGensym`, as shown below.
 
 qudy supplies the symbol generator. It declares `qudyGensym`, a small function
-value, at the start of each function that uses a gensym, so the generator stays
-one self-contained file. Each gensym gets a numbered suffix, so `errName#` comes
+value, at the start of each function that uses `name#` or calls `qudyGensym`, so
+the generator stays one self-contained file. Each gensym gets a numbered suffix, so `errName#` comes
 out as `errName_qd1`, which is unlikely to collide with a name in your code.
 
 The default generator does not inspect the output's scope or reserve existing
@@ -339,15 +339,13 @@ qudyGensym := newSeededGensym(taken)
 
 A function literal shares the symbol generator of the function around it.
 
-Call `GENSYM(want)` directly inside a function body when you compute the desired
-name or need to declare the variable yourself:
+Call `qudyGensym(want)` directly inside a function body when you compute the
+desired name or need to declare the variable yourself:
 
 ```go
-local := GENSYM(param.Name)
+local := qudyGensym(param.Name)
 //`var ~local ~param.Type.Text
 ```
-
-qudy rewrites `GENSYM` to `qudyGensym`.
 
 ## Generate several files
 
@@ -375,6 +373,83 @@ go run ./examples/enums -package colors Color=Red,Green,Blue | qudy -txtar -o ./
 See [examples/enums](examples/enums) for a generator that writes both `String`
 methods and `Parse` functions. The generated methods expect the enum types and
 constants to be defined in the same package.
+
+## Extend a generator with a runtime file
+
+By default a generator is self-contained: the generator file holds all of its
+code. Pass `-runtime`, and qudy also writes `qudy_runtime.go` beside the
+generator. That file is a small runtime for the package, and every template of
+the package shares it. Compile all templates of a package with `-runtime`, or
+none of them.
+
+```sh
+qudy -runtime -o stringer/stringer_gen.go stringer/stringer.go
+```
+
+The runtime adds two things.
+
+### One symbol generator for the package
+
+Without the runtime, every function counts its own gensyms. Two functions that
+write into the same generated function can then both produce `err_qd1`. With
+the runtime, one symbol generator counts for the whole run of the generator, so
+each gensym differs from every other one: `err_qd1`, `err_qd2`, and so on.
+`name#` and calls of `qudyGensym` need no change. With the runtime, such a call
+may also stand outside a function body.
+
+Two limits remain. A gensym can still collide with a name of your own in the
+output, such as a hand-written `err_qd1`. The numbers also follow the order of
+the whole run, so a new gensym early in the run renumbers the later ones.
+
+### Capture and redirect the output
+
+`qudyCapture` runs a function and returns the text of its output lines as a
+string. Nothing reaches the output:
+
+```go
+func path(segments []string) string {
+    return qudyCapture(func() {
+        for _, s := range segments {
+            //`~s/\
+        }
+    })
+}
+```
+
+`path([]string{"usr", "bin"})` returns `usr/bin/`. A capture also takes the
+output lines of every function that runs inside it, and captures nest.
+
+More generally, `qudyEmit` is a variable of the package. While it holds a
+function, every run of output lines goes to that function, in place of the
+`-emit` function. `qudyPush` sets it and returns the call that restores the
+previous value, which suits `defer`:
+
+```go
+func path(segments []string) string {
+    var b strings.Builder
+    defer qudyPush(func(format string, args ...any) { fmt.Fprintf(&b, format, args...) })()
+    for _, s := range segments {
+        segment(s)
+    }
+    return b.String()
+}
+```
+
+Both work with any emit function, a method such as `g.generate` included.
+
+The runtime file declares `qudyGensym`, `qudyCapture` and `qudyPush` as
+ordinary functions, so an editor with the `qudy` tag resolves them in a
+template.
+
+### What it costs
+
+- The generator is no longer one self-contained file. `go run stringer_gen.go`
+  on that file alone fails, and `go run ./stringer` works.
+- The runtime file comes from the most recent qudy compile. After an upgrade of
+  qudy, compile every template of the package again.
+- `qudyEmit` and the symbol generator are variables of the package. Two
+  generators that run at the same time in one process share them, so keep the
+  runtime away from concurrent generation.
 
 ## Use qudy as a library
 

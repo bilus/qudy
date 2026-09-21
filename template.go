@@ -12,19 +12,21 @@ import (
 
 // template is a parsed template.
 type template struct {
-	filename     string
-	packageLine  int
-	lines        []string
-	outputLines  map[int]string
-	blocks       []span
-	funcBodies   []span
-	importsFmt   bool
-	declared     map[string]bool
-	ownGensym    map[span]bool
-	builtinCalls []builtinCall
+	filename      string
+	pkg           string
+	packageLine   int
+	lines         []string
+	outputLines   map[int]string
+	blocks        []span
+	funcBodies    []span
+	importsFmt    bool
+	declared      map[string]bool
+	ownGensym     map[span]bool
+	gensymCalls   []int
+	packageGensym bool
 }
 
-// newTemplate parses a template and rejects misplaced output lines and GENSYM calls.
+// newTemplate parses a template and rejects misplaced output lines and reserved names.
 func newTemplate(filename string, src []byte) (*template, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, src, parser.ParseComments|parser.SkipObjectResolution)
@@ -32,27 +34,24 @@ func newTemplate(filename string, src []byte) (*template, error) {
 		return nil, fmt.Errorf("%s: the template is not Go: %w", filename, err)
 	}
 	t := &template{
-		filename:     filename,
-		packageLine:  fset.Position(file.Package).Line,
-		lines:        splitLines(string(src)),
-		outputLines:  map[int]string{},
-		blocks:       blockSpans(fset, file),
-		funcBodies:   funcBodySpans(fset, file),
-		importsFmt:   importsPackage(file, "fmt"),
-		declared:     declaredNames(file),
-		ownGensym:    ownGensymBodies(fset, file),
-		builtinCalls: findBuiltinCalls(fset, file),
+		filename:      filename,
+		pkg:           file.Name.Name,
+		packageLine:   fset.Position(file.Package).Line,
+		lines:         splitLines(string(src)),
+		outputLines:   map[int]string{},
+		blocks:        blockSpans(fset, file),
+		funcBodies:    funcBodySpans(fset, file),
+		importsFmt:    importsPackage(file, "fmt"),
+		declared:      declaredNames(file),
+		ownGensym:     ownGensymBodies(fset, file),
+		gensymCalls:   callLines(fset, file, gensymVariable),
+		packageGensym: declaresInPackage(file, gensymVariable),
 	}
 	if name, ok := reservedName(t.declared); ok {
 		return nil, fmt.Errorf("%s: the template declares %s, and qudy reserves names that end in %s", filename, name, gensymSuffix)
 	}
-	if t.declared[gensymBuiltin] {
-		return nil, fmt.Errorf("%s: the template declares %s, which is a built-in function", filename, gensymBuiltin)
-	}
-	for _, c := range t.builtinCalls {
-		if t.funcBodyOf(c.line) == (span{}) {
-			return nil, fmt.Errorf("%s:%d: a %s call belongs inside a function body", filename, c.line, c.name)
-		}
+	if lines := callLines(fset, file, legacyGensym); len(lines) > 0 && !t.declared[legacyGensym] {
+		return nil, fmt.Errorf("%s:%d: %s is called %s now", filename, lines[0], legacyGensym, gensymVariable)
 	}
 	for _, group := range file.Comments {
 		for _, c := range group.List {
@@ -73,44 +72,21 @@ func newTemplate(filename string, src []byte) (*template, error) {
 	return t, nil
 }
 
-// builtinCall is one call to a built-in function, with its 1-based position.
-type builtinCall struct {
-	name     string
-	line     int
-	from, to int
-}
+// legacyGensym is the former name of qudyGensym in a template.
+const legacyGensym = "GENSYM"
 
-// gensymBuiltin is the name of the built-in function that returns a gensym.
-const gensymBuiltin = "GENSYM"
-
-// builtinCallsOn returns the calls to built-in functions on one line.
-func (t *template) builtinCallsOn(line int) []builtinCall {
-	var calls []builtinCall
-	for _, c := range t.builtinCalls {
-		if c.line == line {
-			calls = append(calls, c)
-		}
-	}
-	return calls
-}
-
-// findBuiltinCalls finds every call to a built-in function in the file.
-func findBuiltinCalls(fset *token.FileSet, file *ast.File) []builtinCall {
-	var calls []builtinCall
+// callLines returns the line of every call to a function with a plain name.
+func callLines(fset *token.FileSet, file *ast.File, name string) []int {
+	var lines []int
 	ast.Inspect(file, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
+		if call, ok := n.(*ast.CallExpr); ok {
+			if id, ok := call.Fun.(*ast.Ident); ok && id.Name == name {
+				lines = append(lines, fset.Position(id.Pos()).Line)
+			}
 		}
-		id, ok := call.Fun.(*ast.Ident)
-		if !ok || id.Name != gensymBuiltin {
-			return true
-		}
-		at := fset.Position(id.Pos())
-		calls = append(calls, builtinCall{name: id.Name, line: at.Line, from: at.Column, to: at.Column + len(id.Name)})
 		return true
 	})
-	return calls
+	return lines
 }
 
 // span is a range of lines that includes both ends.
@@ -348,4 +324,13 @@ func importsPackage(file *ast.File, path string) bool {
 // needsFmt reports whether the emit calls use fmt without an import in the template.
 func (t *template) needsFmt(emit string) bool {
 	return strings.HasPrefix(emit, "fmt.") && len(t.outputLines) > 0 && !t.importsFmt
+}
+
+// outputBodies returns the opening line of every outermost function body with an output line.
+func (t *template) outputBodies() map[int]bool {
+	bodies := map[int]bool{}
+	for line := range t.outputLines {
+		bodies[t.outerFuncBodyOf(line).from] = true
+	}
+	return bodies
 }

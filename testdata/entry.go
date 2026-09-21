@@ -6,12 +6,12 @@ func (g *liveGenerator) generateDispatchEntry(name string, steps []navStep, recv
 	params := valueParams(h.sig)
 	event := "_"
 	if len(params) > 0 || h.fill != "" {
-		event = GENSYM("e")
+		event = qudyGensym("e")
 	}
 	var locals []string
 	//`~{strconv.Quote(name)}: func(lv live.Ctx, ~event live.Event) error {
 	for _, p := range params {
-		local := GENSYM(p.Name)
+		local := qudyGensym(p.Name)
 		locals = append(locals, local)
 		//`~local, errName# := live.Param[~p.Type.Text](~event, ~{strconv.Quote(p.Name)})
 		//`if errName# != nil {

@@ -4,7 +4,6 @@ package qudy
 import (
 	"fmt"
 	"go/format"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -18,15 +17,47 @@ func Compile(filename string, src []byte, emit string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return t.compile(emit, false)
+}
+
+// CompileWithRuntime returns a template's generator and the runtime file of its package.
+func CompileWithRuntime(filename string, src []byte, emit string) (generator, runtime []byte, err error) {
+	t, err := newTemplate(filename, src)
+	if err != nil {
+		return nil, nil, err
+	}
+	if generator, err = t.compile(emit, true); err != nil {
+		return nil, nil, err
+	}
+	if runtime, err = runtimeSource(t.pkg); err != nil {
+		return nil, nil, fmt.Errorf("%s: the runtime file is not Go: %w", filename, err)
+	}
+	return generator, runtime, nil
+}
+
+// compile writes the generator, against the runtime file or with everything inline.
+func (t *template) compile(emit string, runtime bool) ([]byte, error) {
+	filename := t.filename
+	var err error
 	var gen, run []string
 	var runAt int
 	declaredIn := map[string]span{}
+	for _, line := range t.gensymCalls {
+		if t.funcBodyOf(line) == (span{}) && !runtime && !t.packageGensym {
+			return nil, fmt.Errorf("%s:%d: a %s call outside a function body needs -runtime, or a %s of the package", filename, line, gensymVariable, gensymVariable)
+		}
+	}
 	bodies := t.gensymBodies()
+	outputs := t.outputBodies()
 	flush := func() error {
 		if len(run) == 0 {
 			return nil
 		}
-		call, gensyms, err := emitCall(emit, run)
+		callee := emit
+		if runtime {
+			callee = outVariable
+		}
+		call, gensyms, err := emitCall(callee, run)
 		if err != nil {
 			return fmt.Errorf("%s:%d: %w", filename, runAt, err)
 		}
@@ -62,12 +93,15 @@ func Compile(filename string, src []byte, emit string) ([]byte, error) {
 				return nil, fmt.Errorf("%s:%d: %w", filename, i+1, err)
 			}
 		}
-		gen = append(gen, t.rewriteBuiltinCalls(i+1, line))
+		gen = append(gen, line)
 		if i+1 == t.packageLine && t.needsFmt(emit) {
 			gen = append(gen, `import "fmt"`)
 		}
-		if bodies[i+1] {
+		if bodies[i+1] && !runtime {
 			gen = append(gen, gensymDecl)
+		}
+		if outputs[i+1] && runtime {
+			gen = append(gen, outDecl(emit))
 		}
 	}
 	if err := flush(); err != nil {
@@ -90,17 +124,6 @@ func outputText(comment string) (string, bool) {
 	return strings.CutPrefix(text, backtick)
 }
 
-// rewriteBuiltinCalls replaces each GENSYM on a line with the symbol generator.
-func (t *template) rewriteBuiltinCalls(line int, text string) string {
-	calls := t.builtinCallsOn(line)
-	// Rightmost first keeps the columns of the other calls valid.
-	slices.SortFunc(calls, func(a, b builtinCall) int { return b.from - a.from })
-	for _, c := range calls {
-		text = text[:c.from-1] + gensymVariable + text[c.to-1:]
-	}
-	return text
-}
-
 // gensymBodies returns the opening lines of function bodies that need the built-in symbol generator.
 func (t *template) gensymBodies() map[int]bool {
 	bodies := map[int]bool{}
@@ -109,8 +132,8 @@ func (t *template) gensymBodies() map[int]bool {
 			bodies[body.from] = true
 		}
 	}
-	for _, c := range t.builtinCalls {
-		need(c.line)
+	for _, line := range t.gensymCalls {
+		need(line)
 	}
 	for line, text := range t.outputLines {
 		// The line's run reports the error.
