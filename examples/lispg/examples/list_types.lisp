@@ -15,5 +15,5 @@
   (fmt.Println ^[[int64]] [[1 2] []])
   (let [x 7] (fmt.Println [x (+ x 1)]))
   (let [xs [1 2 3] tail (rest xs) a (cons 9 tail) b (cons 8 tail)]
-    (fmt.Println xs tail a b))
+       (fmt.Println xs tail a b))
   (fmt.Println ^[int64] (cons 1 [])))
