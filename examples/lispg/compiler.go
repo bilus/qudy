@@ -1,9 +1,8 @@
 //go:build qudy || generate
 
-// Command lispg emits Go directly while walking Lisp reader forms.
 package main
 
-//go:generate go run ../../cmd/qudy -emit emit -o compiler_gen.go compiler.go
+//go:generate go run ../../cmd/qudy -runtime -emit emit -o compiler_gen.go compiler.go
 
 import (
 	"fmt"
@@ -78,24 +77,27 @@ func typ(f form, t string) string {
 }
 
 func typeName(f form) string {
-	if f.delim == '[' {
-		arity(f, f.kids, 1, 1)
-		return "[]" + typeName(f.kids[0])
-	}
-	if f.delim == '(' {
-		head, args := parts(f)
-		arity(f, args, 2, 2)
-		need(f, head == "fn" && args[0].delim == '[', "expected (fn [argument types] result type)")
-		var params []string
-		for _, p := range args[0].kids {
-			params = append(params, typeName(p))
+	return qudyCapture(func() {
+		switch f.delim {
+		case '[':
+			arity(f, f.kids, 1, 1)
+			//`[]~{typeName(f.kids[0])}\
+		case '(':
+			head, args := parts(f)
+			arity(f, args, 2, 2)
+			need(f, head == "fn" && args[0].delim == '[', "expected (fn [argument types] result type)")
+			var params []string
+			for _, p := range args[0].kids {
+				params = append(params, typeName(p))
+			}
+			//`func(~@params) ~{typeName(args[1])}\
+		default:
+			name := strings.Split(f.atom, ".")
+			qualified := len(name) == 2 && token.IsIdentifier(name[0]) && token.IsIdentifier(name[1])
+			need(f, qualified || f.atom == "error" || f.atom == "int64" || f.atom == "float64" || f.atom == "string" || f.atom == "bool", "unknown type")
+			//`~f.atom\
 		}
-		return "func(" + strings.Join(params, ", ") + ") " + typeName(args[1])
-	}
-	name := strings.Split(f.atom, ".")
-	qualified := len(name) == 2 && token.IsIdentifier(name[0]) && token.IsIdentifier(name[1])
-	need(f, qualified || f.atom == "error" || f.atom == "int64" || f.atom == "float64" || f.atom == "string" || f.atom == "bool", "unknown type")
-	return f.atom
+	})
 }
 
 func parts(f form) (string, []form) {
@@ -164,8 +166,9 @@ func expr(f form, want string) {
 		//`}()\
 	case "fn":
 		arity(f, args, 2, len(args))
-		signature(args[0], args[0].hint)
-		body(args[1:], args[0].hint)
+		params, result := args[0], args[0].hint
+		//`func(~{parameters(params)}) ~result {
+		body(args[1:], result)
 		//`}\
 	case "defn", "package", "import":
 		fail(f, head+" can only be used at top level")
@@ -207,11 +210,13 @@ func expr(f form, want string) {
 func listExpr(f form, want string) {
 	need(f, want == "" || strings.HasPrefix(want, "[]"), "expected a list type")
 	need(f, want != "" || len(f.kids) > 0, "empty list needs a type hint or context")
-	elem, suffix := "", ""
+
+	elem := strings.TrimPrefix(want, "[]")
+	//`_lispgList\
 	if want != "" {
-		elem, suffix = strings.TrimPrefix(want, "[]"), "["+strings.TrimPrefix(want, "[]")+"]"
+		//`[~elem]\
 	}
-	//`_lispgList~suffix(\
+	//`(\
 	for i, item := range f.kids {
 		if i > 0 {
 			//`, \
@@ -253,28 +258,21 @@ func operator(f form, op string, args []form, want string) {
 	//`)\
 }
 
-func signature(params form, result string) {
-	//`func\
-	parameters(params, result)
-}
-
-func parameters(params form, result string) {
+// Return declarations only; the caller owns the function's delimiters and result.
+func parameters(params form) string {
 	need(params, params.delim == '[', "expected parameter vector")
-	if result != "" {
-		typ(params, result)
-	}
-	//`(\
-	seen := map[string]bool{}
-	for i, p := range params.kids {
-		name, t := ident(p), typ(p, p.hint)
-		need(p, !seen[name], "duplicate parameter")
-		seen[name] = true
-		if i > 0 {
-			//`, \
+	return qudyCapture(func() {
+		seen := map[string]bool{}
+		for i, p := range params.kids {
+			name, t := ident(p), typ(p, p.hint)
+			need(p, !seen[name], "duplicate parameter")
+			seen[name] = true
+			if i > 0 {
+				//`, \
+			}
+			//`~name ~t\
 		}
-		//`~name ~t\
-	}
-	//`) ~result {
+	})
 }
 
 func body(forms []form, result string) {
@@ -403,8 +401,7 @@ func namespaceExpr(f form, stage *int) {
 		*stage = 2
 		need(args[0], args[0].hint == "", "put the return type hint before the parameter vector")
 		name, result := ident(args[0]), args[1].hint
-		//`func ~name\
-		parameters(args[1], result)
+		//`func ~name(~{parameters(args[1])}) ~result {
 		body(args[2:], result)
 		//`}
 	default:
