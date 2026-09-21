@@ -257,6 +257,57 @@ text `[0]`. `~{name[0]}` evaluates the index in the generator: the first byte of
 indexing and calls in the generated code as well as evaluate them in the
 generator.
 
+### Insert a Go string literal
+
+`~"name` inserts a value as a Go string literal, with its quotes and every
+escape it needs:
+
+```go
+path := `C:\temp`
+//`var quoted = ~"path
+//`var naive = "~path"
+```
+
+Produces:
+
+```text
+var quoted = "C:\\temp"
+var naive = "C:\temp"
+```
+
+The two lines differ, and only the first is right. `"~path"` puts the raw value
+between two literal quotes, so the Go compiler reads the value again as source
+text. Here it reads `\t` as a tab, and the generated program compiles with the
+wrong string. A quote or a newline in the value breaks the literal, and then the
+generated code does not compile at all. `~"path` escapes the value, so the
+literal always holds the string you inserted. Keep `"~name"` for a value that
+needs no escaping, such as a Go identifier.
+
+`~"{expr}` takes any expression. qudy formats the value with `%v` first, so
+`~"count` writes `"3"`.
+
+### Insert a list
+
+`~@xs` splices a slice: it inserts the elements with `, ` between them. `~@"xs`
+writes each element as a Go string literal:
+
+```go
+params := []string{"a int", "b string"}
+tags := []string{"<p>", `say "hi"`}
+//`func f(~@params) {}
+//`var tags = []string{~@"tags}
+```
+
+Produces:
+
+```text
+func f(a int, b string) {}
+var tags = []string{"<p>", "say \"hi\""}
+```
+
+An empty slice inserts nothing, and `~@{expr}` takes any expression. For another
+separator, join the elements yourself, as in `~{strings.Join(xs, " | ")}`.
+
 ## Output lines and comments
 
 An output line must be a comment on its own line inside a function body.

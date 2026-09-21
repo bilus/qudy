@@ -321,9 +321,23 @@ func importsPackage(file *ast.File, path string) bool {
 	return false
 }
 
-// needsFmt reports whether the emit calls use fmt without an import in the template.
+// needsFmt reports whether the generator calls fmt without an import in the template.
 func (t *template) needsFmt(emit string) bool {
-	return strings.HasPrefix(emit, "fmt.") && len(t.outputLines) > 0 && !t.importsFmt
+	if t.importsFmt {
+		return false
+	}
+	return t.quotes() || strings.HasPrefix(emit, "fmt.") && len(t.outputLines) > 0
+}
+
+// quotes reports whether an output line has a quoted interpolation.
+func (t *template) quotes() bool {
+	for _, text := range t.outputLines {
+		// The line's run reports the error.
+		if scanned, err := scanOutputLine(text); err == nil && scanned.quotes {
+			return true
+		}
+	}
+	return false
 }
 
 // outputBodies returns the opening line of every outermost function body with an output line.

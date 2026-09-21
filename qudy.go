@@ -57,7 +57,7 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 		if runtime {
 			callee = outVariable
 		}
-		call, gensyms, err := emitCall(callee, run)
+		calls, gensyms, err := emitCalls(callee, run)
 		if err != nil {
 			return fmt.Errorf("%s:%d: %w", filename, runAt, err)
 		}
@@ -68,7 +68,7 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 			gen = append(gen, gensymName(name)+" := "+gensymVariable+"("+strconv.Quote(name)+")")
 			declaredIn[name] = t.blockOf(runAt)
 		}
-		gen = append(gen, call)
+		gen = append(gen, calls...)
 		run = nil
 		return nil
 	}
@@ -137,8 +137,8 @@ func (t *template) gensymBodies() map[int]bool {
 	}
 	for line, text := range t.outputLines {
 		// The line's run reports the error.
-		_, _, gensyms, err := scanOutputLine(text)
-		if err != nil || len(gensyms) == 0 {
+		scanned, err := scanOutputLine(text)
+		if err != nil || len(scanned.gensyms) == 0 {
 			continue
 		}
 		need(line)
@@ -151,28 +151,56 @@ func splitLines(src string) []string {
 	return strings.Split(src, "\n")
 }
 
-// emitCall builds the emit call of a run and lists the run's gensyms.
-func emitCall(emit string, run []string) (string, []string, error) {
+// emitCalls builds the statements that write a run, and lists the run's gensyms.
+func emitCalls(emit string, run []string) ([]string, []string, error) {
+	var calls, args, gensyms []string
 	var text strings.Builder
-	var args, gensyms []string
+	flush := func() {
+		if text.Len() == 0 {
+			return
+		}
+		call := emit + "(" + stringLiteral(text.String())
+		for _, a := range args {
+			call += ", " + a
+		}
+		calls = append(calls, call+")")
+		text.Reset()
+		args = nil
+	}
 	for _, line := range run {
-		lineFormat, lineArgs, lineGensyms, err := scanOutputLine(line)
+		scanned, err := scanOutputLine(line)
 		if err != nil {
-			return "", nil, err
+			return nil, nil, err
 		}
-		lineFormat, ends := lineEnds(lineFormat)
-		text.WriteString(lineFormat)
-		if ends {
-			text.WriteByte('\n')
+		gensyms = append(gensyms, scanned.gensyms...)
+		for i, p := range scanned.parts {
+			if p.splice != "" {
+				flush()
+				calls = append(calls, spliceLoop(emit, p))
+				continue
+			}
+			format := p.format
+			if i == len(scanned.parts)-1 {
+				ends := false
+				if format, ends = lineEnds(format); ends {
+					format += "\n"
+				}
+			}
+			text.WriteString(format)
+			args = append(args, p.args...)
 		}
-		args = append(args, lineArgs...)
-		gensyms = append(gensyms, lineGensyms...)
 	}
-	call := emit + "(" + stringLiteral(text.String())
-	for _, a := range args {
-		call += ", " + a
+	flush()
+	return calls, gensyms, nil
+}
+
+// spliceLoop writes the elements of a slice with a comma between them.
+func spliceLoop(emit string, p part) string {
+	element := emit + "(" + strconv.Quote(verb) + ", qudyX)"
+	if p.quote {
+		element = emit + "(" + strconv.Quote(quoteVerb) + ", " + quoted("qudyX") + ")"
 	}
-	return call + ")", gensyms, nil
+	return "for qudyI, qudyX := range " + p.splice + " {\nif qudyI > 0 {\n" + emit + `(", ")` + "\n}\n" + element + "\n}"
 }
 
 // lineEnds strips a trailing backslash and reports whether the line writes a newline.

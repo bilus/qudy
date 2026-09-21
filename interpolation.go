@@ -8,10 +8,59 @@ import (
 // verb formats every interpolation and gensym in an emit call.
 const verb = "%v"
 
-// scanOutputLine splits an output line into a format, its arguments and its gensyms.
-func scanOutputLine(line string) (string, []string, []string, error) {
+// quoteVerb formats a quoted interpolation, given the text of its value.
+const quoteVerb = "%q"
+
+// part is a piece of an output line, either text or a splice.
+type part struct {
+	format string
+	args   []string
+	splice string
+	quote  bool
+}
+
+// newText returns a piece of text and the arguments of its verbs.
+func newText(format string, args []string) part {
+	return part{format: format, args: args}
+}
+
+// newSplice returns the splice of a slice, with its elements quoted or not.
+func newSplice(slice string, quote bool) part {
+	return part{splice: slice, quote: quote}
+}
+
+// outputLine is a scanned output line, which always ends with a piece of text.
+type outputLine struct {
+	parts   []part
+	gensyms []string
+	quotes  bool
+}
+
+// newOutputLine returns a scanned line from its parts, gensyms and use of quotes.
+func newOutputLine(parts []part, gensyms []string, quotes bool) outputLine {
+	return outputLine{parts: parts, gensyms: gensyms, quotes: quotes}
+}
+
+// quoted returns the argument of a quoted interpolation.
+func quoted(expr string) string {
+	return "fmt.Sprint(" + expr + ")"
+}
+
+// scanOutputLine splits an output line into its parts and lists its gensyms.
+func scanOutputLine(line string) (outputLine, error) {
+	var parts []part
 	var format strings.Builder
 	var args, gensyms []string
+	quotes := false
+	text := func(trim bool) {
+		f := format.String()
+		if trim {
+			f = strings.TrimRight(f, " \t")
+		}
+		parts = append(parts, newText(f, args))
+		format.Reset()
+		args = nil
+	}
 	for i := 0; i < len(line); {
 		c := line[i]
 		if c == '%' {
@@ -21,7 +70,7 @@ func scanOutputLine(line string) (string, []string, []string, error) {
 		}
 		if c == '#' {
 			if !strings.HasPrefix(line[i:], "##") {
-				return "", nil, nil, fmt.Errorf("a # follows the name of a gensym, and ## writes a hash: %s", line[i:])
+				return outputLine{}, fmt.Errorf("a # follows the name of a gensym, and ## writes a hash: %s", line[i:])
 			}
 			format.WriteByte('#')
 			i += 2
@@ -46,31 +95,55 @@ func scanOutputLine(line string) (string, []string, []string, error) {
 			continue
 		}
 		rest := line[i+1:]
-		switch {
-		case strings.HasPrefix(rest, "//"):
-			return strings.TrimRight(format.String(), " \t"), args, gensyms, nil
-		case strings.HasPrefix(rest, "~"):
+		if strings.HasPrefix(rest, "//") {
+			text(true)
+			return newOutputLine(parts, gensyms, quotes), nil
+		}
+		if strings.HasPrefix(rest, "~") {
 			format.WriteByte('~')
 			i += 2
-		case strings.HasPrefix(rest, "{"):
-			n, err := bracedLen(rest)
-			if err != nil {
-				return "", nil, nil, err
-			}
-			args = append(args, strings.TrimSpace(rest[1:n-1]))
-			format.WriteString(verb)
-			i += 1 + n
+			continue
+		}
+		splice := strings.HasPrefix(rest, "@")
+		rest = strings.TrimPrefix(rest, "@")
+		quote := strings.HasPrefix(rest, `"`)
+		rest = strings.TrimPrefix(rest, `"`)
+		expr, n, err := operand(rest)
+		if err != nil {
+			return outputLine{}, err
+		}
+		i += len(line[i+1:]) - len(rest) + 1 + n
+		quotes = quotes || quote
+		switch {
+		case splice:
+			text(false)
+			parts = append(parts, newSplice(expr, quote))
+		case quote:
+			args = append(args, quoted(expr))
+			format.WriteString(quoteVerb)
 		default:
-			n, err := selectorLen(rest)
-			if err != nil {
-				return "", nil, nil, err
-			}
-			args = append(args, rest[:n])
+			args = append(args, expr)
 			format.WriteString(verb)
-			i += 1 + n
 		}
 	}
-	return format.String(), args, gensyms, nil
+	text(false)
+	return newOutputLine(parts, gensyms, quotes), nil
+}
+
+// operand returns the expression of an interpolation and its length in src.
+func operand(src string) (string, int, error) {
+	if strings.HasPrefix(src, "{") {
+		n, err := bracedLen(src)
+		if err != nil {
+			return "", 0, err
+		}
+		return strings.TrimSpace(src[1 : n-1]), n, nil
+	}
+	n, err := selectorLen(src)
+	if err != nil {
+		return "", 0, err
+	}
+	return src[:n], n, nil
 }
 
 // bracedLen measures a braced interpolation and skips braces inside string and rune literals.
