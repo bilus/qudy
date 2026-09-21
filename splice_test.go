@@ -121,6 +121,51 @@ func TestInterpolationsUseAStringMethod(t *testing.T) {
 	}
 }
 
+// wrapper is the README's example of spliced parameters and call arguments.
+var wrapper = strings.Join([]string{
+	"package main",
+	"",
+	"type Param struct{ Name, Type string }",
+	"",
+	`func (p Param) String() string { return p.Name + " " + p.Type }`,
+	"",
+	"func names(params []Param) []string {",
+	"	var list []string",
+	"	for _, p := range params {",
+	"		list = append(list, p.Name)",
+	"	}",
+	"	return list",
+	"}",
+	"",
+	"func main() {",
+	`	writeWrapper("Get", []Param{{"ctx", "context.Context"}, {"id", "int"}})`,
+	`	writeWrapper("Close", nil)`,
+	"}",
+	"",
+	"func writeWrapper(method string, params []Param) {",
+	"	//`func (s *Logged) ~method(~@params) error {",
+	"	//`	log.Println(~\"method, ~@{names(params)})",
+	"	//`	return s.inner.~method(~@{names(params)})",
+	"	//`}",
+	"}",
+	"",
+}, "\n")
+
+func TestTheReadmeWrapperExample(t *testing.T) {
+	got := runWithRuntime(t, "fmt.Printf", map[string]string{"main.go": wrapper}, nil)
+	want := "func (s *Logged) Get(ctx context.Context, id int) error {\n" +
+		"\tlog.Println(\"Get\", ctx, id)\n" +
+		"\treturn s.inner.Get(ctx, id)\n" +
+		"}\n" +
+		"func (s *Logged) Close() error {\n" +
+		"\tlog.Println(\"Close\", )\n" +
+		"\treturn s.inner.Close()\n" +
+		"}\n"
+	if got != want {
+		t.Errorf("the generator wrote\n%s\nwant\n%s", got, want)
+	}
+}
+
 func TestCompileImportsFmtForAQuote(t *testing.T) {
 	gen := compile(t, template(`//`+"`"+`x := ~"name`))
 	if !strings.Contains(gen, `import "fmt"`) {

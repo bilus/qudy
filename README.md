@@ -288,31 +288,68 @@ needs no escaping, such as a Go identifier.
 
 ### Insert a list
 
-`~@xs` splices a slice: it inserts the elements with `, ` between them. `~@"xs`
-writes each element as a Go string literal:
+`~@xs` splices a slice: it inserts the elements with `, ` between them. Most
+lists in Go source have that shape: parameters, call arguments, and the elements
+of a literal.
+
+This template writes a method that logs a call and forwards it to the wrapped
+value. Its parameters and its arguments come from one slice:
 
 ```go
-params := []string{"a int", "b string"}
+type Param struct{ Name, Type string }
+
+func (p Param) String() string { return p.Name + " " + p.Type }
+
+func writeWrapper(method string, params []Param) {
+    //`func (s *Logged) ~method(~@params) error {
+    //`	log.Println(~"method, ~@{names(params)})
+    //`	return s.inner.~method(~@{names(params)})
+    //`}
+}
+```
+
+`writeWrapper("Get", []Param{{"ctx", "context.Context"}, {"id", "int"}})`
+produces:
+
+```go
+func (s *Logged) Get(ctx context.Context, id int) error {
+	log.Println("Get", ctx, id)
+	return s.inner.Get(ctx, id)
+}
+```
+
+`~@params` writes the parameter list. It can take a `[]Param` directly, because
+every interpolation formats its value with `fmt`, and `Param` has a `String`
+method. `~@{names(params)}` writes the call arguments: the braces take any
+expression, here a helper that returns the names as a `[]string`.
+
+An empty slice inserts nothing, so `writeWrapper("Close", nil)` writes
+`Close()`. After a fixed argument, the result has a dangling comma:
+`log.Println("Close", )`. Go accepts that, and gofmt removes it.
+
+`~@"xs` writes each element as a Go string literal, which suits the elements of
+a `[]string`:
+
+```go
 tags := []string{"<p>", `say "hi"`}
-//`func f(~@params) {}
 //`var tags = []string{~@"tags}
 ```
 
 Produces:
 
 ```text
-func f(a int, b string) {}
 var tags = []string{"<p>", "say \"hi\""}
 ```
 
-An empty slice inserts nothing, and `~@{expr}` takes any expression. For another
-separator, join the elements yourself, as in `~{strings.Join(xs, " | ")}`.
+A splice writes one line. For one element per line, such as the fields of a
+struct or the cases of a switch, put a Go loop around an output line, as in the
+stringer above. For another separator, join the elements yourself:
+`~{strings.Join(xs, " | ")}`.
 
-Every interpolation formats its value with `fmt`, so a value with a `String`
-method, or an `error`, inserts the text of that method, with or without quotes.
-One case gives a surprising result. A splice ranges over the slice by value, so
-with a `String` method on a pointer receiver, the elements of a `[]Tag` come out
-as structs, such as `{p}`. Give `String` a value receiver, or splice a `[]*Tag`.
+One use of `String` gives a surprising result. A splice ranges over the slice by
+value, so with a `String` method on a pointer receiver, the elements of a
+`[]Tag` come out as structs, such as `{p}`. Give `String` a value receiver, or
+splice a `[]*Tag`.
 
 ## Output lines and comments
 
