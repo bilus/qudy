@@ -92,9 +92,9 @@ func typeName(f form) string {
 			}
 			//`func(~@params) ~{typeName(args[1])}\
 		default:
-			name := strings.Split(f.atom, ".")
+			name := strings.Split(strings.TrimLeft(f.atom, "*"), ".")
 			qualified := len(name) == 2 && token.IsIdentifier(name[0]) && token.IsIdentifier(name[1])
-			need(f, qualified || f.atom == "error" || f.atom == "int64" || f.atom == "float64" || f.atom == "string" || f.atom == "bool", "unknown type")
+			need(f, qualified || len(name) == 1 && strings.Contains(" error int64 float64 string bool ", " "+name[0]+" "), "unknown type")
 			//`~f.atom\
 		}
 	})

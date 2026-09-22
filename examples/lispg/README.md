@@ -48,7 +48,8 @@ Return-type hints precede parameter vectors. Omit the hint for functions without
 | `and or not` | Boolean operations. |
 
 Types include `int64`, `float64`, `string`, `bool`, `error`, and qualified Go types.
-Use `^[int64]` for lists and `^(fn [int64] bool)` for function types.
+Use `^[int64]` for lists, `^(fn [int64] bool)` for function types, and `^*http.Request`
+for a pointer. `examples/http.lisp` serves HTTP with `net/http` that way.
 
 ```clojure
 ^[int64] []

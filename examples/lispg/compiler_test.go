@@ -1,11 +1,15 @@
 package main_test
 
 import (
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // lispg is the transpiler, built once for every test.
@@ -40,7 +44,7 @@ func (l transpiler) compileFile(t *testing.T, name string) *program {
 	t.Helper()
 	generated, err := exec.CommandContext(t.Context(), l.binary, filepath.Join("examples", name)).Output()
 	if err != nil {
-		t.Fatalf("transpile %s: %v", name, err)
+		t.Fatalf("transpile %s: %v\n%s", name, err, stderr(err))
 	}
 	return newProgram(t, generated)
 }
@@ -52,9 +56,17 @@ func (l transpiler) compile(t *testing.T, source string) *program {
 	cmd.Stdin = strings.NewReader(source)
 	generated, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("transpile %q: %v", source, err)
+		t.Fatalf("transpile %q: %v\n%s", source, err, stderr(err))
 	}
 	return newProgram(t, generated)
+}
+
+// stderr returns what a failed command wrote to standard error.
+func stderr(err error) []byte {
+	if exit, ok := err.(*exec.ExitError); ok {
+		return exit.Stderr
+	}
+	return nil
 }
 
 // reject transpiles a source that lispg must refuse, and returns its message.
@@ -106,15 +118,21 @@ func (p *program) buildError(t *testing.T) string {
 	return string(out)
 }
 
-// exec builds the program once and runs it in a directory, with arguments.
-func (p *program) exec(t *testing.T, dir string, args ...string) (string, error) {
+// built builds the program once and returns the path of its binary.
+func (p *program) built(t *testing.T) string {
 	t.Helper()
 	if p.binary == "" {
 		if out, err := p.build(); err != nil {
 			t.Fatalf("go build: %v\n%s\n%s", err, out, p.source)
 		}
 	}
-	cmd := exec.CommandContext(t.Context(), p.binary, args...)
+	return p.binary
+}
+
+// exec runs the program in a directory, with arguments.
+func (p *program) exec(t *testing.T, dir string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), p.built(t), args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -134,6 +152,21 @@ func (p *program) runIn(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("the program failed: %v\n%s\n%s", err, out, p.source)
 	}
 	return out
+}
+
+// start runs the program in the background until the test ends.
+func (p *program) start(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), p.built(t), args...)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// Kill and Wait report a process that already exited.
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
 }
 
 // fail runs the program, which must exit with an error, and returns its output.
@@ -209,6 +242,44 @@ func TestDirectoryTree(t *testing.T) {
 	}
 }
 
+// get returns the body at a URL, waiting for the server to start.
+func get(t *testing.T, url string) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err == nil {
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(body)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no answer from %s: %v", url, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestHTTPServer(t *testing.T) {
+	const address = "localhost:8080"
+	if listener, err := net.Listen("tcp", address); err != nil {
+		t.Skipf("%s is in use: %v", address, err)
+	} else if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lispg.compileFile(t, "http.lisp").start(t)
+	if got, want := get(t, "http://"+address+"/world"), "Hello, /world\n"; got != want {
+		t.Errorf("GET /world answered %q, want %q", got, want)
+	}
+}
+
 func TestSemantics(t *testing.T) {
 	source := `(package main) (import "fmt")
 (defn choose ^int64 [^bool b] (let [x 40] (if b (+ x 2) 0)))
@@ -261,6 +332,8 @@ func TestRejectedSources(t *testing.T) {
 		"(package main) (defn _lispgList [] 1)",
 		"(package main) (defn ^int64 f [] 1)",
 		"(package main) (defn f ^fs.bad.name [] nil)",
+		"(package main) (defn f [^*bogus x] 1)",
+		"(package main) (defn f [^* x] 1)",
 	} {
 		t.Run(source, func(t *testing.T) {
 			if out := lispg.reject(t, source); !strings.Contains(out, "lispg:") {
