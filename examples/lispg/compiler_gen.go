@@ -2,8 +2,10 @@
 
 //go:build !qudy || generate
 
+//line compiler.go:3
 package main
 
+//line compiler.go:7
 import (
 	"fmt"
 	"go/token"
@@ -84,11 +86,14 @@ func typ(f form, t string) string {
 
 func typeName(f form) string {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:86
 	return qudyCapture(func() {
 		switch f.delim {
 		case '[':
 			arity(f, f.kids, 1, 1)
+//line compiler.go:90
 			qudyOut(`[]%v`, typeName(f.kids[0]))
+//line compiler.go:91
 		case '(':
 			head, args := parts(f)
 			arity(f, args, 2, 2)
@@ -97,19 +102,25 @@ func typeName(f form) string {
 			for _, p := range args[0].kids {
 				params = append(params, typeName(p))
 			}
+//line compiler.go:99
 			qudyOut(`func(`)
+//line compiler.go:99
 			for qudyI, qudyX := range params {
 				if qudyI > 0 {
 					qudyOut(", ")
 				}
 				qudyOut("%v", qudyX)
 			}
+//line compiler.go:99
 			qudyOut(`) %v`, typeName(args[1]))
+//line compiler.go:100
 		default:
 			name := strings.Split(strings.TrimLeft(f.atom, "*"), ".")
 			qualified := len(name) == 2 && token.IsIdentifier(name[0]) && token.IsIdentifier(name[1])
 			need(f, qualified || len(name) == 1 && strings.Contains(" error int64 float64 string bool ", " "+name[0]+" "), "unknown type")
+//line compiler.go:104
 			qudyOut(`%v`, f.atom)
+//line compiler.go:105
 		}
 	})
 }
@@ -132,23 +143,32 @@ func emit(format string, args ...any) {
 
 func atom(f form) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:126
 	need(f, f.atom != "", "expected an atom")
 	if strings.HasPrefix(f.atom, "\"") {
 		_, err := strconv.Unquote(f.atom)
 		need(f, err == nil, "invalid string")
+//line compiler.go:130
 		qudyOut(`%v`, f.atom)
+//line compiler.go:131
 	} else if n, err := strconv.ParseInt(f.atom, 10, 64); err == nil {
+//line compiler.go:132
 		qudyOut(`int64(%v)`, n)
+//line compiler.go:133
 	} else if strings.ContainsAny(f.atom, ".eE") && numeric(f.atom) {
 		_, err := strconv.ParseFloat(f.atom, 64)
 		need(f, err == nil, "invalid float64 literal")
+//line compiler.go:136
 		qudyOut(`float64(%v)`, f.atom)
+//line compiler.go:137
 	} else {
 		segments := strings.Split(f.atom, ".")
 		for i, p := range segments {
 			segments[i] = ident(form{atom: p, pos: f.pos})
 		}
+//line compiler.go:142
 		qudyOut(`%v`, strings.Join(segments, "."))
+//line compiler.go:143
 	}
 }
 
@@ -161,6 +181,7 @@ func numeric(s string) bool {
 // Go checks ordinary calls, names and operand types in the emitted program.
 func expr(f form, want string) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:154
 	if f.hint != "" {
 		want = typ(f, f.hint)
 	}
@@ -176,17 +197,25 @@ func expr(f form, want string) {
 	switch head {
 	case "if", "when", "let":
 		need(f, want != "", "expression needs a ^type hint or a typed function result")
+//line compiler.go:168
 		qudyOut(`func() %v {
 `, want)
+//line compiler.go:170
 		localExpr(f, want)
+//line compiler.go:171
 		qudyOut(`}()`)
+//line compiler.go:172
 	case "fn":
 		arity(f, args, 2, len(args))
 		params, result := args[0], args[0].hint
+//line compiler.go:174
 		qudyOut(`func(%v) %v {
 `, parameters(params), result)
+//line compiler.go:176
 		body(args[1:], result)
+//line compiler.go:177
 		qudyOut(`}`)
+//line compiler.go:178
 	case "defn", "package", "import":
 		fail(f, head+" can only be used at top level")
 	case "+", "-", "*", "/", "%", "=", "not=", "<", "<=", ">", ">=", "and", "or", "not":
@@ -199,14 +228,20 @@ func expr(f form, want string) {
 				n = 2
 			}
 			arity(f, args, n, n)
+//line compiler.go:190
 			qudyOut(`_lispg%v`, helper)
+//line compiler.go:191
 		} else {
 			expr(f.kids[0], "")
 		}
+//line compiler.go:194
 		qudyOut(`(`)
+//line compiler.go:195
 		for i, a := range args {
 			if i > 0 {
+//line compiler.go:197
 				qudyOut(`, `)
+//line compiler.go:198
 			}
 			t := ""
 			if head == "rest" || head == "cons" {
@@ -220,31 +255,45 @@ func expr(f form, want string) {
 			}
 			expr(a, t)
 		}
+//line compiler.go:211
 		qudyOut(`)`)
+//line compiler.go:212
 	}
 }
 
 func listExpr(f form, want string) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:216
 	need(f, want == "" || strings.HasPrefix(want, "[]"), "expected a list type")
 	need(f, want != "" || len(f.kids) > 0, "empty list needs a type hint or context")
 	elem := strings.TrimPrefix(want, "[]")
+//line compiler.go:219
 	qudyOut(`_lispgList`)
+//line compiler.go:220
 	if want != "" {
+//line compiler.go:221
 		qudyOut(`[%v]`, elem)
+//line compiler.go:222
 	}
+//line compiler.go:223
 	qudyOut(`(`)
+//line compiler.go:224
 	for i, item := range f.kids {
 		if i > 0 {
+//line compiler.go:226
 			qudyOut(`, `)
+//line compiler.go:227
 		}
 		expr(item, elem)
 	}
+//line compiler.go:230
 	qudyOut(`)`)
+//line compiler.go:231
 }
 
 func operator(f form, op string, args []form, want string) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:234
 	min, max := 2, len(args)
 	if op == "-" {
 		min = 1
@@ -263,22 +312,31 @@ func operator(f form, op string, args []form, want string) {
 	if goOp, ok := map[string]string{"=": "==", "not=": "!=", "and": "&&", "or": "||", "not": "!"}[op]; ok {
 		op = goOp
 	}
+//line compiler.go:252
 	qudyOut(`(`)
+//line compiler.go:253
 	if len(args) == 1 {
+//line compiler.go:254
 		qudyOut(`%v`, op)
+//line compiler.go:255
 	}
 	for i, a := range args {
 		if i > 0 {
+//line compiler.go:258
 			qudyOut(` %v `, op)
+//line compiler.go:259
 		}
 		expr(a, want)
 	}
+//line compiler.go:262
 	qudyOut(`)`)
+//line compiler.go:263
 }
 
 // Return declarations only; the caller owns the function's delimiters and result.
 func parameters(params form) string {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:267
 	need(params, params.delim == '[', "expected parameter vector")
 	return qudyCapture(func() {
 		seen := map[string]bool{}
@@ -287,24 +345,33 @@ func parameters(params form) string {
 			need(p, !seen[name], "duplicate parameter")
 			seen[name] = true
 			if i > 0 {
+//line compiler.go:275
 				qudyOut(`, `)
+//line compiler.go:276
 			}
+//line compiler.go:277
 			qudyOut(`%v %v`, name, t)
+//line compiler.go:278
 		}
 	})
 }
 
 func body(forms []form, result string) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:283
 	if len(forms) == 0 {
 		zero(result)
 	}
 	for i, f := range forms {
 		if i == len(forms)-1 && result != "" {
+//line compiler.go:288
 			qudyOut(`return `)
+//line compiler.go:289
 			expr(f, result)
+//line compiler.go:289
 			qudyOut(`
 `)
+//line compiler.go:291
 		} else {
 			discardExpr(f)
 		}
@@ -314,26 +381,37 @@ func body(forms []form, result string) {
 // An absent branch or empty body yields the result type's zero value.
 func zero(result string) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:299
 	if result != "" {
+//line compiler.go:299
 		qudyOut(`var _lispgZero %v; return _lispgZero
 `, result)
+//line compiler.go:301
 	}
 }
 
 func conditional(args []form, result string) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:305
 	qudyOut(`if `)
+//line compiler.go:306
 	expr(args[0], "bool")
+//line compiler.go:306
 	qudyOut(` {
 `)
+//line compiler.go:308
 	body(args[1:2], result)
 	if len(args) == 3 {
+//line compiler.go:309
 		qudyOut(`} else {
 `)
+//line compiler.go:311
 		body(args[2:3], result)
 	}
+//line compiler.go:312
 	qudyOut(`}
 `)
+//line compiler.go:314
 	if len(args) == 2 {
 		zero(result)
 	}
@@ -341,36 +419,48 @@ func conditional(args []form, result string) {
 
 func binding(f form, args []form, result string) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:320
 	arity(f, args, 1, len(args))
 	v := args[0]
 	need(v, v.delim == '[' && len(v.kids)%2 == 0, "expected name/value binding pairs")
 	// Each nested scope lets an initializer see the previous binding of its name.
 	for i := 0; i < len(v.kids); i += 2 {
 		name := ident(v.kids[i])
+//line compiler.go:325
 		qudyOut(`{
 `)
+//line compiler.go:327
 		t := v.kids[i].hint
 		if t != "" {
 			typ(v.kids[i], t)
+//line compiler.go:330
 			qudyOut(`var %v %v = `, name, t)
+//line compiler.go:331
 		} else {
+//line compiler.go:332
 			qudyOut(`%v := `, name)
+//line compiler.go:333
 		}
 		expr(v.kids[i+1], t)
+//line compiler.go:335
 		qudyOut(`
 _ = %v
-`, name)
+`, /*line compiler.go:336*/ name)
+//line compiler.go:337
 	}
 	body(args[1:], result)
 	for i := 0; i < len(v.kids); i += 2 {
+//line compiler.go:339
 		qudyOut(`}
 `)
+//line compiler.go:341
 	}
 }
 
 // Emit the same expressions without materializing a result when it is discarded.
 func localExpr(f form, result string) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:346
 	head, args := parts(f)
 	switch head {
 	case "if":
@@ -378,25 +468,36 @@ func localExpr(f form, result string) {
 		conditional(args, result)
 	case "when":
 		arity(f, args, 1, len(args))
+//line compiler.go:353
 		qudyOut(`if `)
+//line compiler.go:354
 		expr(args[0], "bool")
+//line compiler.go:354
 		qudyOut(` {
 `)
+//line compiler.go:356
 		body(args[1:], result)
+//line compiler.go:356
 		qudyOut(`}
 `)
+//line compiler.go:358
 		zero(result)
 	case "let":
+//line compiler.go:359
 		qudyOut(`{
 `)
+//line compiler.go:361
 		binding(f, args, result)
+//line compiler.go:361
 		qudyOut(`}
 `)
+//line compiler.go:363
 	}
 }
 
 func discardExpr(f form) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:367
 	if f.delim == '(' {
 		head, _ := parts(f)
 		if head == "if" || head == "when" || head == "let" {
@@ -406,35 +507,46 @@ func discardExpr(f form) {
 		// Calls may return zero, one, or several values; Go discards them here.
 		if head != "fn" && !strings.Contains(" + - * / % = not= < <= > >= and or not ", " "+head+" ") {
 			expr(f, "")
+//line compiler.go:375
 			qudyOut(`
 `)
+//line compiler.go:377
 			return
 		}
 	}
+//line compiler.go:380
 	qudyOut(`_ = `)
+//line compiler.go:381
 	expr(f, "")
+//line compiler.go:381
 	qudyOut(`
 `)
+//line compiler.go:383
 }
 
 func namespaceExpr(f form, state *int) {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:386
 	head, args := parts(f)
 	switch head {
 	case "package":
 		arity(f, args, 1, 1)
 		need(f, *state == STATE_START, "package must appear once, first")
 		name := ident(args[0])
+//line compiler.go:391
 		qudyOut(`package %v
 `, name)
+//line compiler.go:393
 		*state = STATE_GOT_PACKAGE
 	case "import":
 		need(f, *state == STATE_GOT_PACKAGE, "imports must follow package and precede functions")
 		for _, a := range args {
 			path, err := strconv.Unquote(a.atom)
 			need(a, a.delim == 0 && err == nil && path != "", "expected quoted import path")
+//line compiler.go:398
 			qudyOut(`import %q
 `, fmt.Sprint(path))
+//line compiler.go:400
 		}
 	case "defn":
 		arity(f, args, 3, len(args))
@@ -442,11 +554,15 @@ func namespaceExpr(f form, state *int) {
 		need(args[0], args[0].hint == "", "put the return type hint before the parameter vector")
 		name, result := ident(args[0]), args[1].hint
 		*state = STATE_GOT_DEFN
+//line compiler.go:406
 		qudyOut(`func %v(%v) %v {
 `, name, parameters(args[1]), result)
+//line compiler.go:408
 		body(args[2:], result)
+//line compiler.go:408
 		qudyOut(`}
 `)
+//line compiler.go:410
 	default:
 		fail(f, "expected package, import or defn")
 	}
@@ -454,6 +570,7 @@ func namespaceExpr(f form, state *int) {
 
 func main() {
 	qudyOut := qudyDispatch(func(format string, args ...any) { emit(format, args...) })
+//line compiler.go:416
 	defer func() {
 		if e := recover(); e != nil {
 			fmt.Fprintln(os.Stderr, "lispg:", e)
@@ -488,10 +605,12 @@ func main() {
 		namespaceExpr(read(&s, t), &state)
 	}
 	need(form{}, state >= STATE_GOT_PACKAGE, "missing package form")
+//line compiler.go:450
 	qudyOut(`func _lispgList[T any](xs ...T) []T { return xs }
 func _lispgFirst[T any](xs []T) T { return xs[0] }
 func _lispgRest[T any](xs []T) []T { if len(xs) == 0 { return xs }; return xs[1:] }
 func _lispgEmpty[T any](xs []T) bool { return len(xs) == 0 }
 func _lispgCons[T any](x T, xs []T) []T { return append([]T{x}, xs...) }
 `)
+//line compiler.go:455
 }

@@ -366,14 +366,13 @@ func TestTypeErrors(t *testing.T) {
 	}
 }
 
+// TestLineLimit keeps the transpiler's source under 500 lines.
 func TestLineLimit(t *testing.T) {
-	for _, name := range []string{"compiler.go", "compiler_gen.go"} {
-		data, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n := strings.Count(string(data), "\n"); n > 500 {
-			t.Errorf("%s: %d lines exceeds 500", name, n)
-		}
+	data, err := os.ReadFile("compiler.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), "\n"); n > 500 {
+		t.Errorf("compiler.go: %d lines exceeds 500", n)
 	}
 }

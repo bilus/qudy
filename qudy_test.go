@@ -4,20 +4,29 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/bilus/qudy"
 )
 
-// compile compiles a template, or fails the test.
+// compile compiles a template and returns its generator without line directives.
 func compile(t *testing.T, src string) string {
 	t.Helper()
 	gen, err := qudy.Compile("test.go", []byte(src), "g.generate")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(gen)
+	return withoutDirectives(string(gen))
+}
+
+// lineComments matches a line directive on its own line or inline.
+var lineComments = regexp.MustCompile(`(?m)^//line [^\n]*\n| ?/\*line [^*]*\*/`)
+
+// withoutDirectives returns a generator's text without its line directives.
+func withoutDirectives(gen string) string {
+	return lineComments.ReplaceAllString(gen, "")
 }
 
 // builtin opens the declaration of the built-in symbol generator.

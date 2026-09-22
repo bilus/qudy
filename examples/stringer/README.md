@@ -2,7 +2,7 @@
 
 This example writes the `String` method of an enum, which is the job of
 `golang.org/x/tools/cmd/stringer`. The whole generator is one template,
-`stringer.go`, and it shows a case where a gensym matters.
+`stringer.go`.
 
     go run ./examples/stringer -package axis -type axis x y z v
 
@@ -45,39 +45,4 @@ The same `return` line, written by hand:
 
 `go generate` compiles the template into `stringer_gen.go`. The emit function
 is the default, `fmt.Printf`, so the generator prints to standard output and
-needs no type of its own. Nothing else in this directory is written by hand, and the
-symbol generator behind `v#` and `x#` is part of `stringer_gen.go`.
-
-## The first two lines
-
-The template starts with `//go:build qudy || generate`. A normal build has
-neither tag, so it ignores the template and uses `stringer_gen.go`, which qudy
-writes with `//go:build !qudy || generate`. `go generate` sets the `generate`
-tag, so it reads the template and finds the `go:generate` line there, even
-before a generator exists. qudy leaves that line out of the generator, so the
-directive runs once.
-
-## Why `v#` and `x#`
-
-stringer names two things in the code it writes: the receiver `i`, and a local
-`x` in its guard function. A constant named `x` makes that code fail to build,
-because the local shadows the constant:
-
-    type axis int
-
-    const (
-        x axis = iota
-        y
-        z
-    )
-
-    $ stringer -type=axis && go build
-    ./axis_string.go:11:8: invalid operation: x - 0 (mismatched types [1]struct{} and untyped int)
-
-The line is `g.Printf("\tvar x [1]struct{}\n")`, at `cmd/stringer/stringer.go:356`
-in golang.org/x/tools v0.50.0.
-
-Here the receiver is `v#` and the local is `x#`. The symbol generator gives each
-gensym a suffix, so the generated file says `v_qd1` and `x_qd1`, and `go build`
-accepts the package with the constants `x y z v`. `stringer_test.go` checks
-that.
+needs no type of its own.

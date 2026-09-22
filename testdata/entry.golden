@@ -1,3 +1,4 @@
+//line entry.go:1
 package generator
 
 // generateDispatchEntry writes the table's entry for one handler, on the
@@ -14,31 +15,40 @@ func (g *liveGenerator) generateDispatchEntry(name string, steps []navStep, recv
 			return want + "_qd" + digits
 		}
 	}()
+//line entry.go:6
 	params := valueParams(h.sig)
 	event := "_"
 	if len(params) > 0 || h.fill != "" {
 		event = qudyGensym("e")
 	}
 	var locals []string
+//line entry.go:11
 	g.generate(`%v: func(lv live.Ctx, %v live.Event) error {
 `, strconv.Quote(name), event)
+//line entry.go:13
 	for _, p := range params {
 		local := qudyGensym(p.Name)
 		locals = append(locals, local)
 		errName_qd := qudyGensym("errName")
+//line entry.go:16
 		g.generate(`%v, %v := live.Param[%v](%v, %v)
 if %v != nil {
 	return %v
 }
-`, local, errName_qd, p.Type.Text, event, strconv.Quote(p.Name), errName_qd, errName_qd)
+`, /*line entry.go:16*/ local, errName_qd, p.Type.Text, event, strconv.Quote(p.Name) /*line entry.go:17*/, errName_qd /*line entry.go:18*/, errName_qd)
+//line entry.go:20
 	}
 	for i, s := range steps {
 		if i > 0 {
+//line entry.go:22
 			g.generate(`{
 `)
+//line entry.go:24
 		}
+//line entry.go:24
 		g.generate(`%v := %v
 `, s.param, s.state)
+//line entry.go:26
 		recv = s.param
 	}
 	fill, callee := h.fill, h.method
@@ -48,6 +58,7 @@ if %v != nil {
 	if fill != "" {
 		decodeErr_qd := qudyGensym("decodeErr")
 		ruleErr_qd := qudyGensym("ruleErr")
+//line entry.go:33
 		g.generate(`if %v := form.Decode(&%v.%v, %v); %v != nil {
 	return %v
 }
@@ -55,30 +66,47 @@ if %v := form.Validate(&%v.%v); %v != nil {
 	return %v
 }
 return form.Update(&%v.%v, func() {
-`, decodeErr_qd, recv, fill, event, decodeErr_qd, decodeErr_qd, ruleErr_qd, recv, fill, ruleErr_qd, ruleErr_qd, recv, fill)
+`, /*line entry.go:33*/ decodeErr_qd, recv, fill, event, decodeErr_qd /*line entry.go:34*/, decodeErr_qd /*line entry.go:36*/, ruleErr_qd, recv, fill, ruleErr_qd /*line entry.go:37*/, ruleErr_qd /*line entry.go:39*/, recv, fill)
+//line entry.go:40
 	}
+//line entry.go:41
 	g.generate(`%v.%v(lv`, recv, callee)
+//line entry.go:42
 	for _, s := range steps {
 		if s.id != "" {
+//line entry.go:44
 			g.generate(`.WithID(%v)`, strconv.Quote(s.id))
+//line entry.go:45
 		}
 	}
 	for _, local := range locals {
+//line entry.go:48
 		g.generate(`, %v`, local)
+//line entry.go:49
 	}
+//line entry.go:49
 	g.generate(`)
 `)
+//line entry.go:51
 	if fill != "" {
+//line entry.go:51
 		g.generate(`})
 `)
+//line entry.go:53
 	} else {
+//line entry.go:53
 		g.generate(`return nil
 `)
+//line entry.go:55
 	}
 	for range max(len(steps)-1, 0) {
+//line entry.go:56
 		g.generate(`}
 `)
+//line entry.go:58
 	}
+//line entry.go:58
 	g.generate(`},
 `)
+//line entry.go:60
 }

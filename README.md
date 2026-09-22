@@ -159,6 +159,9 @@ and escapes literal percent signs, which is why the template can say `%d`.
 Your emit function must accept a format string and its arguments and interpret
 them like `fmt.Printf`.
 
+The generator emits `//line` directives to make compilation errors point to the
+template.
+
 ## Build tags and editor support
 
 A template parses as Go, so `gofmt` can format it and your editor can read it.

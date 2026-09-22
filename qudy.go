@@ -49,6 +49,19 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 	}
 	bodies := t.gensymBodies()
 	outputs := t.outputBodies()
+	// synced holds while the copied template lines keep their own line numbers.
+	synced := false
+	insert := func(lines ...string) {
+		gen = append(gen, lines...)
+		synced = false
+	}
+	copyLine := func(number int, line string) {
+		if !synced && isCode(line) {
+			gen = append(gen, lineDirective(filename, number))
+			synced = true
+		}
+		gen = append(gen, line)
+	}
 	flush := func() error {
 		if len(run) == 0 {
 			return nil
@@ -57,7 +70,7 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 		if runtime {
 			callee = outVariable
 		}
-		calls, gensyms, err := emitCalls(callee, run)
+		statements, gensyms, err := emitStatements(callee, filename, run, runAt)
 		if err != nil {
 			return fmt.Errorf("%s:%d: %w", filename, runAt, err)
 		}
@@ -65,10 +78,12 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 			if in, ok := declaredIn[name]; ok && in.from <= runAt && runAt <= in.to {
 				continue
 			}
-			gen = append(gen, gensymName(name)+" := "+gensymVariable+"("+strconv.Quote(name)+")")
+			insert(gensymName(name) + " := " + gensymVariable + "(" + strconv.Quote(name) + ")")
 			declaredIn[name] = t.blockOf(runAt)
 		}
-		gen = append(gen, calls...)
+		for _, s := range statements {
+			insert(lineDirective(filename, s.line), s.text)
+		}
 		run = nil
 		return nil
 	}
@@ -86,6 +101,7 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 		}
 		if isGenerateDirective(line) {
 			// The directive compiles the template, so it stays out of the generator.
+			synced = false
 			continue
 		}
 		if i+1 < t.packageLine && isConstraint(line) {
@@ -93,15 +109,15 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 				return nil, fmt.Errorf("%s:%d: %w", filename, i+1, err)
 			}
 		}
-		gen = append(gen, line)
+		copyLine(i+1, line)
 		if i+1 == t.packageLine && t.needsFmt(emit) {
-			gen = append(gen, `import "fmt"`)
+			insert(`import "fmt"`)
 		}
 		if bodies[i+1] && !runtime {
-			gen = append(gen, gensymDecl)
+			insert(gensymDecl)
 		}
 		if outputs[i+1] && runtime {
-			gen = append(gen, outDecl(emit))
+			insert(outDecl(emit))
 		}
 	}
 	if err := flush(); err != nil {
@@ -151,23 +167,38 @@ func splitLines(src string) []string {
 	return strings.Split(src, "\n")
 }
 
-// emitCalls builds the statements that write a run, and lists the run's gensyms.
-func emitCalls(emit string, run []string) ([]string, []string, error) {
-	var calls, args, gensyms []string
+// emitStatements builds the statements that write a run, and lists the run's gensyms.
+func emitStatements(emit, filename string, run []string, first int) ([]statement, []string, error) {
+	var statements []statement
+	var gensyms []string
 	var text strings.Builder
+	var groups []argGroup
+	start, last := 0, 0
 	flush := func() {
 		if text.Len() == 0 {
 			return
 		}
-		call := emit + "(" + stringLiteral(text.String())
-		for _, a := range args {
-			call += ", " + a
+		literal := stringLiteral(text.String())
+		call, line := emit+"("+literal, start
+		// One output line maps its arguments to itself; a run marks each argument group.
+		if last == start {
+			line = start + 1 - (strings.Count(literal, "\n") + 1)
 		}
-		calls = append(calls, call+")")
+		for _, g := range groups {
+			for i, a := range g.args {
+				if i == 0 && last > start {
+					call += ", " + inlineDirective(filename, g.line) + " " + a
+					continue
+				}
+				call += ", " + a
+			}
+		}
+		statements = append(statements, newStatement(call+")", line))
 		text.Reset()
-		args = nil
+		groups = nil
 	}
-	for _, line := range run {
+	for j, line := range run {
+		number := first + j
 		scanned, err := scanOutputLine(line)
 		if err != nil {
 			return nil, nil, err
@@ -176,7 +207,7 @@ func emitCalls(emit string, run []string) ([]string, []string, error) {
 		for i, p := range scanned.parts {
 			if p.splice != "" {
 				flush()
-				calls = append(calls, spliceLoop(emit, p))
+				statements = append(statements, newStatement(spliceLoop(emit, p), number))
 				continue
 			}
 			format := p.format
@@ -186,12 +217,18 @@ func emitCalls(emit string, run []string) ([]string, []string, error) {
 					format += "\n"
 				}
 			}
+			if text.Len() == 0 {
+				start = number
+			}
+			last = number
 			text.WriteString(format)
-			args = append(args, p.args...)
+			if len(p.args) > 0 {
+				groups = append(groups, newArgGroup(number, p.args))
+			}
 		}
 	}
 	flush()
-	return calls, gensyms, nil
+	return statements, gensyms, nil
 }
 
 // spliceLoop writes the elements of a slice with a comma between them.
