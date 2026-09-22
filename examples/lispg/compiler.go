@@ -24,6 +24,12 @@ type form struct {
 	pos   scanner.Position
 }
 
+const (
+	STATE_START       = 0
+	STATE_GOT_PACKAGE = 1
+	STATE_GOT_DEFN    = 2
+)
+
 func fail(f form, message string) { panic(fmt.Errorf("%s: %s", f.pos, message)) }
 
 func need(f form, ok bool, message string) {
@@ -117,20 +123,19 @@ func emit(format string, args ...any) {
 }
 
 func atom(f form) {
-	s := f.atom
-	need(f, s != "", "expected an atom")
-	if strings.HasPrefix(s, "\"") {
-		_, err := strconv.Unquote(s)
+	need(f, f.atom != "", "expected an atom")
+	if strings.HasPrefix(f.atom, "\"") {
+		_, err := strconv.Unquote(f.atom)
 		need(f, err == nil, "invalid string")
-		//`~s\
-	} else if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		//`~f.atom\
+	} else if n, err := strconv.ParseInt(f.atom, 10, 64); err == nil {
 		//`int64(~n)\
-	} else if strings.ContainsAny(s, ".eE") && numeric(s) {
-		_, err := strconv.ParseFloat(s, 64)
+	} else if strings.ContainsAny(f.atom, ".eE") && numeric(f.atom) {
+		_, err := strconv.ParseFloat(f.atom, 64)
 		need(f, err == nil, "invalid float64 literal")
-		//`float64(~s)\
+		//`float64(~f.atom)\
 	} else {
-		segments := strings.Split(s, ".")
+		segments := strings.Split(f.atom, ".")
 		for i, p := range segments {
 			segments[i] = ident(form{atom: p, pos: f.pos})
 		}
@@ -210,7 +215,6 @@ func expr(f form, want string) {
 func listExpr(f form, want string) {
 	need(f, want == "" || strings.HasPrefix(want, "[]"), "expected a list type")
 	need(f, want != "" || len(f.kids) > 0, "empty list needs a type hint or context")
-
 	elem := strings.TrimPrefix(want, "[]")
 	//`_lispgList\
 	if want != "" {
@@ -362,8 +366,7 @@ func localExpr(f form, result string) {
 func discardExpr(f form) {
 	if f.delim == '(' {
 		head, _ := parts(f)
-		switch head {
-		case "if", "when", "let":
+		if head == "if" || head == "when" || head == "let" {
 			localExpr(f, "")
 			return
 		}
@@ -379,17 +382,17 @@ func discardExpr(f form) {
 	//`
 }
 
-func namespaceExpr(f form, stage *int) {
+func namespaceExpr(f form, state *int) {
 	head, args := parts(f)
 	switch head {
 	case "package":
 		arity(f, args, 1, 1)
-		need(f, *stage == 0, "package must appear once, first")
+		need(f, *state == STATE_START, "package must appear once, first")
 		name := ident(args[0])
 		//`package ~name
-		*stage = 1
+		*state = STATE_GOT_PACKAGE
 	case "import":
-		need(f, *stage == 1, "imports must follow package and precede functions")
+		need(f, *state == STATE_GOT_PACKAGE, "imports must follow package and precede functions")
 		for _, a := range args {
 			path, err := strconv.Unquote(a.atom)
 			need(a, a.delim == 0 && err == nil && path != "", "expected quoted import path")
@@ -397,10 +400,10 @@ func namespaceExpr(f form, stage *int) {
 		}
 	case "defn":
 		arity(f, args, 3, len(args))
-		need(f, *stage > 0, "package must come first")
-		*stage = 2
+		need(f, *state >= STATE_GOT_PACKAGE, "package must come first")
 		need(args[0], args[0].hint == "", "put the return type hint before the parameter vector")
 		name, result := ident(args[0]), args[1].hint
+		*state = STATE_GOT_DEFN
 		//`func ~name(~{parameters(args[1])}) ~result {
 		body(args[2:], result)
 		//`}
@@ -417,15 +420,11 @@ func main() {
 		}
 	}()
 	in := os.Stdin
-	if len(os.Args) > 2 {
-		panic(fmt.Errorf("usage: lispg [source.lisp]"))
-	}
+	need(form{}, len(os.Args) <= 2, "usage: lispg [source.lisp]")
 	if len(os.Args) == 2 {
 		var err error
 		in, err = os.Open(os.Args[1])
-		if err != nil {
-			panic(err)
-		}
+		need(form{}, err == nil, fmt.Sprintf("%v", err))
 		defer in.Close()
 	}
 	var s scanner.Scanner
@@ -437,7 +436,7 @@ func main() {
 		return r != scanner.EOF && !unicode.IsSpace(r) && !strings.ContainsRune("()[]^;\",", r)
 	}
 	s.Error = func(s *scanner.Scanner, msg string) { panic(fmt.Errorf("%s: %s", s.Position, msg)) }
-	stage := 0
+	state := STATE_START
 	for t := s.Scan(); t != scanner.EOF; t = s.Scan() {
 		if t == ';' {
 			for s.Peek() != '\n' && s.Peek() != scanner.EOF {
@@ -445,11 +444,9 @@ func main() {
 			}
 			continue
 		}
-		namespaceExpr(read(&s, t), &stage)
+		namespaceExpr(read(&s, t), &state)
 	}
-	if stage == 0 {
-		panic(fmt.Errorf("missing package form"))
-	}
+	need(form{}, state >= STATE_GOT_PACKAGE, "missing package form")
 	//`func _lispgList[T any](xs ...T) []T { return xs }
 	//`func _lispgFirst[T any](xs []T) T { return xs[0] }
 	//`func _lispgRest[T any](xs []T) []T { if len(xs) == 0 { return xs }; return xs[1:] }
