@@ -92,7 +92,7 @@ func segment(s string) {
 }
 `
 
-// gensyms asks for one name in two functions and in a direct call.
+// gensyms asks for names in two functions, a direct call and two scopes.
 const gensyms = `package main
 
 func main() {
@@ -100,6 +100,9 @@ func main() {
 	second()
 	third := qudyGensym("err")
 	//` + "`" + `~third
+	scoped()
+	scoped()
+	//` + "`" + `x#
 }
 
 func first() {
@@ -108,6 +111,18 @@ func first() {
 
 func second() {
 	//` + "`" + `err#
+}
+
+func scoped() {
+	end := qudyScope()
+	defer end()
+	//` + "`" + `a# b#
+	inner()
+}
+
+func inner() {
+	defer qudyScope()()
+	//` + "`" + `c#
 }
 `
 
@@ -120,7 +135,7 @@ func TestTheRuntimeFileExtendsAGenerator(t *testing.T) {
 	for _, c := range []testCase{
 		{"qudyCapture returns the output of called functions, and nests", captures, "before\na/[b/]\nafter\n"},
 		{"qudyPush redirects called functions until its pop", pushes, "const dir = \"usr/bin/\"\n"},
-		{"one symbol generator serves every function", gensyms, "err_qd1\nerr_qd2\nerr_qd3\n"},
+		{"one counter serves every function, and a scope restores it", gensyms, "err_qd1\nerr_qd2\nerr_qd3\na_qd4 b_qd5\nc_qd6\na_qd4 b_qd5\nc_qd6\nx_qd4\n"},
 	} {
 		t.Run(c.description, func(t *testing.T) {
 			got := runWithRuntime(t, "fmt.Printf", map[string]string{"main.go": c.template}, nil)
@@ -188,7 +203,7 @@ func TestCompileWithRuntimeLeavesTheSymbolGeneratorToTheRuntimeFile(t *testing.T
 	if strings.Contains(string(gen), builtin) {
 		t.Errorf("the generator declares a symbol generator of its own:\n%s", gen)
 	}
-	for _, want := range []string{"package p\n", "func qudyCapture(f func()) string {", "func qudyGensym(want string) string {"} {
+	for _, want := range []string{"package p\n", "func qudyCapture(f func()) string {", "func qudyGensym(want string) string {", "func qudyScope() func() {"} {
 		if !strings.Contains(string(runtime), want) {
 			t.Errorf("the runtime file is\n%s\nwant it to hold\n%s", runtime, want)
 		}

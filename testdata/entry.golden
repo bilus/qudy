@@ -5,15 +5,16 @@ package generator
 // receiver or on the nested instance the steps lead to.
 func (g *liveGenerator) generateDispatchEntry(name string, steps []navStep, recv string, h handlerBinding) {
 	qudyGensym := func() func(string) string {
-		counts := map[string]int{}
-		return func(want string) string {
-			counts[want]++
+		count := 0
+		gensym := func(want string) string {
+			count++
 			digits := ""
-			for n := counts[want]; n > 0; n /= 10 {
+			for n := count; n > 0; n /= 10 {
 				digits = string(rune('0'+n%10)) + digits
 			}
 			return want + "_qd" + digits
 		}
+		return gensym
 	}()
 //line entry.go:6
 	params := valueParams(h.sig)

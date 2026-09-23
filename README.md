@@ -418,8 +418,28 @@ call `qudyGensym`, as shown below.
 
 qudy supplies the symbol generator. It declares `qudyGensym`, a small function
 value, at the start of each function that uses `name#` or calls `qudyGensym`, so
-the generator stays one self-contained file. Each gensym gets a numbered suffix, so `errName#` comes
-out as `errName_qd1`, which is unlikely to collide with a name in your code.
+the generator stays one self-contained file. Each generated symbol gets a
+numbered suffix, so `errName#` comes out as `errName_qd1`, which is unlikely to
+collide with a name in your code.
+
+The numbers follow the order of generation, so a new gensym renumbers the ones
+after it, which shows up as churn in generated code under version control. To
+confine that, tell qudy where a scope of the generated program starts. The
+numbering restarts in a scope, and the call that `qudyScope` returns ends it:
+
+```go
+func writeStringer(typ string, names []string) {
+    defer qudyScope()()
+    //`func (v# ~typ) String() string {
+    ...
+}
+```
+
+Each generated function then numbers from one, and a gensym added in one of
+them cannot renumber another. A loop that writes several functions ends the
+scope at the end of each iteration, with `end()` in place of the `defer`. Scopes
+nest: a scope inside another continues the numbering and restores it when it
+ends, so a name from an enclosing scope is never reused while it is live.
 
 The default generator does not inspect the output's scope or reserve existing
 identifiers. A user-defined `errName_qd1` can still collide with its result.
@@ -494,9 +514,13 @@ each gensym differs from every other one: `err_qd1`, `err_qd2`, and so on.
 `name#` and calls of `qudyGensym` need no change. With the runtime, such a call
 may also stand outside a function body.
 
-Two limits remain. A gensym can still collide with a name of your own in the
-output, such as a hand-written `err_qd1`. The numbers also follow the order of
-the whole run, so a new gensym early in the run renumbers the later ones.
+`qudyScope` works across functions here: a helper called inside a scope numbers
+on from the caller's count, and the scope's end restores the count for the
+whole package. Without the runtime, a scope reaches only the function that
+opens it, because every function has a symbol generator of its own.
+
+One limit remains. A gensym can still collide with a name of your own in the
+output, such as a hand-written `err_qd1`.
 
 ### Capture and redirect the output
 

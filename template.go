@@ -23,6 +23,7 @@ type template struct {
 	declared      map[string]bool
 	ownGensym     map[span]bool
 	gensymCalls   []int
+	scopeCalls    []int
 	packageGensym bool
 }
 
@@ -45,6 +46,7 @@ func newTemplate(filename string, src []byte) (*template, error) {
 		declared:      declaredNames(file),
 		ownGensym:     ownGensymBodies(fset, file),
 		gensymCalls:   callLines(fset, file, gensymVariable),
+		scopeCalls:    callLines(fset, file, scopeVariable),
 		packageGensym: declaresInPackage(file, gensymVariable),
 	}
 	if name, ok := reservedName(t.declared); ok {

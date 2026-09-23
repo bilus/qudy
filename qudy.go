@@ -48,6 +48,14 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 		}
 	}
 	bodies := t.gensymBodies()
+	scopes := t.scopeBodies()
+	if !runtime && !t.declared[scopeVariable] {
+		for _, line := range t.scopeCalls {
+			if body := t.outerFuncBodyOf(line); body == (span{}) || !bodies[body.from] {
+				return nil, fmt.Errorf("%s:%d: a %s call belongs in a function body with a gensym, unless -runtime is given", filename, line, scopeVariable)
+			}
+		}
+	}
 	outputs := t.outputBodies()
 	// synced holds while the copied template lines keep their own line numbers.
 	synced := false
@@ -114,7 +122,11 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 			insert(`import "fmt"`)
 		}
 		if bodies[i+1] && !runtime {
-			insert(gensymDecl)
+			if scopes[i+1] {
+				insert(gensymScopeDecl)
+			} else {
+				insert(gensymDecl)
+			}
 		}
 		if outputs[i+1] && runtime {
 			insert(outDecl(emit))
@@ -158,6 +170,18 @@ func (t *template) gensymBodies() map[int]bool {
 			continue
 		}
 		need(line)
+	}
+	return bodies
+}
+
+// scopeBodies returns the opening lines of function bodies that call qudyScope without declaring it.
+func (t *template) scopeBodies() map[int]bool {
+	bodies := map[int]bool{}
+	if t.declared[scopeVariable] {
+		return bodies
+	}
+	for _, line := range t.scopeCalls {
+		bodies[t.outerFuncBodyOf(line).from] = true
 	}
 	return bodies
 }

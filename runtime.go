@@ -52,13 +52,19 @@ func qudyDispatch(fallback func(format string, args ...any)) func(format string,
 	}
 }
 
-// qudyCounts counts the gensyms of each name for the whole run.
-var qudyCounts = map[string]int{}
+// qudyCount numbers the gensyms of the run.
+var qudyCount int
 
-// qudyGensym returns a name that differs from every other gensym of this generator.
+// qudyGensym returns a name that differs from every gensym of the enclosing scopes.
 func qudyGensym(want string) string {
-	qudyCounts[want]++
-	return fmt.Sprintf("%%s` + gensymSuffix + `%%d", want, qudyCounts[want])
+	qudyCount++
+	return fmt.Sprintf("%%s` + gensymSuffix + `%%d", want, qudyCount)
+}
+
+// qudyScope starts a scope of the generated program and returns its end.
+func qudyScope() func() {
+	saved := qudyCount
+	return func() { qudyCount = saved }
 }
 `
 

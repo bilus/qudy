@@ -214,6 +214,60 @@ func TestCompileDeclaresTheSymbolGeneratorForADirectCall(t *testing.T) {
 	}
 }
 
+// scoped ends a scope after each iteration, so every iteration numbers its gensyms alike.
+const scoped = `package main
+
+func main() {
+	for range 2 {
+		end := qudyScope()
+		//` + "`" + `a# b#
+		end()
+	}
+	//` + "`" + `c#
+}
+`
+
+func TestAScopeRestartsTheNumbering(t *testing.T) {
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("the go tool is not on the path")
+	}
+	gen, err := qudy.Compile("scoped.go", []byte(scoped), "fmt.Printf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gen), "qudyGensym, qudyScope := func() (func(string) string, func() func()) {") {
+		t.Fatalf("the generator lacks the scope function:\n%s", gen)
+	}
+	file := filepath.Join(t.TempDir(), "scoped_gen.go")
+	if err := os.WriteFile(file, gen, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.CommandContext(t.Context(), goTool, "run", file).CombinedOutput()
+	if err != nil {
+		t.Fatalf("the generator fails: %v\n%s", err, out)
+	}
+	if want := "a_qd1 b_qd2\na_qd1 b_qd2\nc_qd1\n"; string(out) != want {
+		t.Errorf("the generator wrote %q, want %q", out, want)
+	}
+}
+
+func TestCompileDeclaresTheScopeFunctionOnlyWhereItIsCalled(t *testing.T) {
+	gen := compile(t, template("//`x := e#"))
+	if strings.Contains(gen, "qudyScope") {
+		t.Errorf("a function without a qudyScope call declares it:\n%s", gen)
+	}
+	own := "package p\n\nfunc qudyScope() func() { return func() {} }\n\nfunc f() {\n\tdefer qudyScope()()\n\t//`x := e#\n}\n"
+	gen = compile(t, own)
+	if strings.Contains(gen, "qudyGensym, qudyScope :=") {
+		t.Errorf("the template has its own qudyScope, and the generator declares another:\n%s", gen)
+	}
+	_, err := qudy.Compile("test.go", []byte(template("defer qudyScope()()", "x := 1", "_ = x")), "g.generate")
+	if err == nil || !strings.Contains(err.Error(), "test.go:4: a qudyScope call belongs in a function body with a gensym") {
+		t.Fatalf("Compile returned %v, want a rejection of a scope without a gensym", err)
+	}
+}
+
 func TestCompileUsesTheSymbolGeneratorOfTheTemplate(t *testing.T) {
 	type testCase struct {
 		description string

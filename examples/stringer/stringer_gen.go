@@ -28,15 +28,16 @@ func main() {
 // writeStringer writes an enum's String method and its guard against changed constants.
 func writeStringer(pkg, typ string, names []string) {
 	qudyGensym := func() func(string) string {
-		counts := map[string]int{}
-		return func(want string) string {
-			counts[want]++
+		count := 0
+		gensym := func(want string) string {
+			count++
 			digits := ""
-			for n := counts[want]; n > 0; n /= 10 {
+			for n := count; n > 0; n /= 10 {
 				digits = string(rune('0'+n%10)) + digits
 			}
 			return want + "_qd" + digits
 		}
+		return gensym
 	}()
 	v_qd := qudyGensym("v")
 //line stringer.go:27
