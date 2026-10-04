@@ -589,6 +589,6 @@ run the generator.
 - [stringer](examples/stringer): a complete enum generator and `go generate` integration.
 - [enums](examples/enums): several output files from one template.
 - [sumtype](examples/sumtype): a larger generator that reads Go source.
-
-The name stands for “quick and dirty quasiquoting”: quote the code you want to
-produce, and insert Go values where it varies.
+- [lispg](examples/lispg): a Lisp-to-Go transpiler (usable toy).
+  
+The name stands for “quick and dirty quasiquoting” and is inspired by Clojure macros.
