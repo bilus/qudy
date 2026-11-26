@@ -413,6 +413,26 @@ gensym in a generator variable of its own, `errName_qd`, so `errName#` and
 `~errName` can stand in one output line and mean different things. For the same
 reason a template may not declare a name that ends in `_qd`.
 
+Inside a braced interpolation, `name#` is the same gensym as a Go string of the
+generator, so a function of the template can take the generated name:
+
+```go
+//`value#, err# := ~expr
+//`~tree.Set(~i, ~{wrap(value#)})
+```
+
+With `expr` set to `parse(input)`, `tree` to `tree`, `i` to zero, and a `wrap`
+that returns `"box(" + name + ")"`, this produces:
+
+```text
+value_qd1, err_qd2 := parse(input)
+tree.Set(0, box(value_qd1))
+```
+
+qudy reads `value#` in the braces as the variable `value_qd`, and the block's
+rule above decides where the generator declares it. A `#` inside a string
+literal, a rune literal or a comment of the expression stays as written.
+
 `name#` belongs in output lines. When the template's Go code needs the gensym,
 call `qudyGensym`, as shown below.
 
