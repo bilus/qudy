@@ -108,10 +108,11 @@ func scanOutputLine(line string) (outputLine, error) {
 		rest = strings.TrimPrefix(rest, "@")
 		quote := strings.HasPrefix(rest, `"`)
 		rest = strings.TrimPrefix(rest, `"`)
-		expr, n, err := operand(rest)
+		expr, used, n, err := operand(rest)
 		if err != nil {
 			return outputLine{}, err
 		}
+		gensyms = append(gensyms, used...)
 		i += len(line[i+1:]) - len(rest) + 1 + n
 		quotes = quotes || quote
 		switch {
@@ -130,20 +131,58 @@ func scanOutputLine(line string) (outputLine, error) {
 	return newOutputLine(parts, gensyms, quotes), nil
 }
 
-// operand returns the expression of an interpolation and its length in src.
-func operand(src string) (string, int, error) {
+// operand returns the expression of an interpolation, its gensyms and its length in src.
+func operand(src string) (string, []string, int, error) {
 	if strings.HasPrefix(src, "{") {
 		n, err := bracedLen(src)
 		if err != nil {
-			return "", 0, err
+			return "", nil, 0, err
 		}
-		return strings.TrimSpace(src[1 : n-1]), n, nil
+		expr, gensyms := bracedGensyms(strings.TrimSpace(src[1 : n-1]))
+		return expr, gensyms, n, nil
 	}
 	n, err := selectorLen(src)
 	if err != nil {
-		return "", 0, err
+		return "", nil, 0, err
 	}
-	return src[:n], n, nil
+	return src[:n], nil, n, nil
+}
+
+// bracedGensyms replaces each gensym of a braced expression with its variable, and lists them.
+func bracedGensyms(expr string) (string, []string) {
+	var out strings.Builder
+	var gensyms []string
+	for i := 0; i < len(expr); {
+		n := 1
+		switch c := expr[i]; {
+		case c == '"' || c == '\'' || c == '`':
+			// A hash in a literal is the literal's own text.
+			if l, ok := literalLen(expr[i:]); ok {
+				n = l
+			}
+		case strings.HasPrefix(expr[i:], "/*"):
+			n = len(expr) - i
+			if end := strings.Index(expr[i+2:], "*/"); end >= 0 {
+				n = end + 4
+			}
+		case strings.HasPrefix(expr[i:], "//"):
+			n = len(expr) - i
+		case isNameStart(c):
+			n = nameLen(expr[i:])
+			if rest := expr[i+n:]; strings.HasPrefix(rest, "#") && !strings.HasPrefix(rest, "##") {
+				gensyms = append(gensyms, expr[i:i+n])
+				out.WriteString(gensymName(expr[i : i+n]))
+				i += n + 1
+				continue
+			}
+		case '0' <= c && c <= '9':
+			// The letters of a number, as in 0x1f, start no name.
+			n = nameLen(expr[i:])
+		}
+		out.WriteString(expr[i : i+n])
+		i += n
+	}
+	return out.String(), gensyms
 }
 
 // bracedLen measures a braced interpolation and skips braces inside string and rune literals.

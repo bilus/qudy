@@ -33,6 +33,16 @@ func TestCompileReadsEachInterpolation(t *testing.T) {
 		{"a tilde comment on its own leaves an empty line", "~// a note", "g.generate(`\n`)"},
 		{"the compiler doubles a percent sign", "50% of ~n", "g.generate(`50%% of %v\n`, n)"},
 		{"a brace inside a string literal does not close the interpolation", `~{q("a}b")} x`, "g.generate(`%v x\n`, q(\"a}b\"))"},
+		{"a gensym in braces is the name's text", "x := ~{wrap(value#)}", "g.generate(`x := %v\n`, wrap(value_qd))"},
+		{"two gensyms in braces", "~{pair(key#, value#)}", "g.generate(`%v\n`, pair(key_qd, value_qd))"},
+		{"a gensym in braces and outside them", "value# := ~{wrap(value#)}", "g.generate(`%v := %v\n`, value_qd, wrap(value_qd))"},
+		{"a gensym in a quoted interpolation", `s := ~"{value#}`, "g.generate(`s := %q\n`, fmt.Sprint(value_qd))"},
+		{"a gensym in a spliced interpolation", "f(~@{names(value#)})", "range names(value_qd) {"},
+		{"a hash inside a string literal in braces stays", `~{q("a#b", value#)}`, "g.generate(`%v\n`, q(\"a#b\", value_qd))"},
+		{"a hash inside a raw string literal in braces stays", "~{q(`a#`, value#)}", "g.generate(`%v\n`, q(`a#`, value_qd))"},
+		{"a hash inside a rune literal in braces stays", `~{q('#', value#)}`, "g.generate(`%v\n`, q('#', value_qd))"},
+		{"a hash inside a comment in braces stays", "~{q(value# /* not a# */)}", "q(value_qd /* not a# */)"},
+		{"a number in braces holds no name", "~{q(0x1f, value#)}", "g.generate(`%v\n`, q(0x1f, value_qd))"},
 	} {
 		t.Run(c.description, func(t *testing.T) {
 			if got := compile(t, template("//`"+c.line)); !strings.Contains(got, c.want) {
