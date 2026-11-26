@@ -357,6 +357,82 @@ func TestCompileKeepsAGensymApartFromTheNamesOfTheTemplate(t *testing.T) {
 	}
 }
 
+func TestCompileDeclaresAGensymInBracesOncePerBlock(t *testing.T) {
+	type testCase struct {
+		description  string
+		lines        []string
+		declarations int
+	}
+	for _, c := range []testCase{
+		{"in braces alone", []string{"//`use(~{wrap(value#)})"}, 1},
+		{"outside braces first, in one run", []string{"//`value# := 1", "//`use(~{wrap(value#)})"}, 1},
+		{"in braces first, in one run", []string{"//`use(~{wrap(value#)})", "//`value# := 1"}, 1},
+		{"in two runs of one block", []string{"//`value# := 1", "n := 1", "_ = n", "//`use(~{wrap(value#)})"}, 1},
+		{"in a block and a block inside it", []string{"//`value# := 1", "if true {", "//`use(~{wrap(value#)})", "}"}, 1},
+		{"in two blocks side by side", []string{"if true {", "//`value# := 1", "}", "if true {", "//`use(~{wrap(value#)})", "}"}, 2},
+	} {
+		t.Run(c.description, func(t *testing.T) {
+			gen := compile(t, template(c.lines...))
+			declaration := `value_qd := qudyGensym("value")`
+			if got := strings.Count(gen, declaration); got != c.declarations {
+				t.Errorf("the generator declares the gensym %d times, want %d:\n%s", got, c.declarations, gen)
+			}
+			if declared, used := strings.Index(gen, declaration), strings.Index(gen, "wrap(value_qd)"); used < declared {
+				t.Errorf("the generator uses the gensym without a declaration above the use:\n%s", gen)
+			}
+			if !strings.Contains(gen, builtin) {
+				t.Errorf("the generator lacks the symbol generator:\n%s", gen)
+			}
+		})
+	}
+}
+
+// braced passes gensyms to a function of the template, beside the same gensyms in the text.
+const braced = `package main
+
+func main() {
+	for i := range 2 {
+		//` + "`" + `value#, err# := read(~i)
+		//` + "`" + `set(~i, ~{wrap(value#)}, ~{join(value#, err#)})
+	}
+	//` + "`" + `use(~{wrap(late#)}, ~{wrap("late#")})
+	n := 7
+	//` + "`" + `late# := ~n
+}
+
+func wrap(name string) string { return "wrap(" + name + ")" }
+
+func join(a, b string) string { return a + "+" + b }
+`
+
+func TestAGensymInBracesIsTheNameOutsideThem(t *testing.T) {
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("the go tool is not on the path")
+	}
+	gen, err := qudy.Compile("braced.go", []byte(braced), "fmt.Printf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "braced_gen.go")
+	if err := os.WriteFile(file, gen, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.CommandContext(t.Context(), goTool, "run", file).CombinedOutput()
+	if err != nil {
+		t.Fatalf("the generator fails: %v\n%s", err, out)
+	}
+	want := "value_qd1, err_qd2 := read(0)\n" +
+		"set(0, wrap(value_qd1), value_qd1+err_qd2)\n" +
+		"value_qd3, err_qd4 := read(1)\n" +
+		"set(1, wrap(value_qd3), value_qd3+err_qd4)\n" +
+		"use(wrap(late_qd5), wrap(late#))\n" +
+		"late_qd5 := 7\n"
+	if string(out) != want {
+		t.Errorf("the generator wrote\n%s\nwant\n%s", out, want)
+	}
+}
+
 // both writes a template variable beside the gensym of its name, without importing fmt.
 const both = `package main
 

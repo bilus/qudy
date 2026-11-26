@@ -126,6 +126,23 @@ func inner() {
 }
 `
 
+// bracedGensyms passes a gensym to a function in two functions and in a scope.
+const bracedGensyms = `package main
+
+func main() {
+	//` + "`" + `a# := ~{twice(a#)}
+	other()
+	//` + "`" + `~{twice(a#)}
+}
+
+func other() {
+	defer qudyScope()()
+	//` + "`" + `~{twice(a#)} = a#
+}
+
+func twice(name string) string { return name + name }
+`
+
 func TestTheRuntimeFileExtendsAGenerator(t *testing.T) {
 	type testCase struct {
 		description string
@@ -136,6 +153,7 @@ func TestTheRuntimeFileExtendsAGenerator(t *testing.T) {
 		{"qudyCapture returns the output of called functions, and nests", captures, "before\na/[b/]\nafter\n"},
 		{"qudyPush redirects called functions until its pop", pushes, "const dir = \"usr/bin/\"\n"},
 		{"one counter serves every function, and a scope restores it", gensyms, "err_qd1\nerr_qd2\nerr_qd3\na_qd4 b_qd5\nc_qd6\na_qd4 b_qd5\nc_qd6\nx_qd4\n"},
+		{"a gensym in braces is the name outside them", bracedGensyms, "a_qd1 := a_qd1a_qd1\na_qd2a_qd2 = a_qd2\na_qd1a_qd1\n"},
 	} {
 		t.Run(c.description, func(t *testing.T) {
 			got := runWithRuntime(t, "fmt.Printf", map[string]string{"main.go": c.template}, nil)
