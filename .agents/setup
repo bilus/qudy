@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Prepares an Amp orb for this repository: the Go toolchain, the module's
+# dependencies, and a warm build cache. Safe to run again on a prepared orb.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# go.mod asks for Go 1.25, and examples/sumtype builds only with Go 1.27 or later.
+GO_VERSION=1.27.4
+declare -A GO_SHA256=(
+	[amd64]=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
+	[arm64]=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92
+)
+GO_ROOT=/usr/local/go
+BIN_DIR=/usr/local/bin
+
+# as_root runs a command directly when /usr/local is writable, and with sudo otherwise.
+as_root() {
+	if [[ -w "$(dirname "$GO_ROOT")" && -w "$BIN_DIR" ]]; then
+		"$@"
+	else
+		sudo "$@"
+	fi
+}
+
+# timed prints a step's name and how long it took, so setup.log shows the slow one.
+timed() {
+	local name=$1 start=$SECONDS
+	shift
+	echo "==> $name"
+	"$@"
+	echo "    done in $((SECONDS - start))s"
+}
+
+install_go() {
+	if [[ "$(head -n 1 "$GO_ROOT/VERSION" 2>/dev/null)" == "go$GO_VERSION" ]]; then
+		echo "    go$GO_VERSION is already installed"
+	else
+		local arch archive
+		case "$(uname -m)" in
+		x86_64) arch=amd64 ;;
+		aarch64 | arm64) arch=arm64 ;;
+		*)
+			echo "unsupported architecture: $(uname -m)" >&2
+			return 1
+			;;
+		esac
+		archive="$(mktemp)"
+		curl -fsSL --retry 3 -o "$archive" "https://go.dev/dl/go$GO_VERSION.linux-$arch.tar.gz"
+		echo "${GO_SHA256[$arch]}  $archive" | sha256sum --check --quiet
+		as_root rm -rf "$GO_ROOT"
+		as_root tar -C "$(dirname "$GO_ROOT")" -xzf "$archive"
+		rm -f "$archive"
+	fi
+	# BIN_DIR is on the PATH of every shell, so no profile needs to change.
+	as_root ln -sf "$GO_ROOT/bin/go" "$GO_ROOT/bin/gofmt" "$BIN_DIR/"
+}
+
+# warm_cache compiles the packages and their tests. A broken build must not fail setup.
+warm_cache() {
+	go build ./... && go test -run '^$' ./... >/dev/null ||
+		echo "    warning: the build cache is only partly warm, because a package does not compile" >&2
+}
+
+timed "Install Go $GO_VERSION" install_go
+timed "Download modules" go mod download
+timed "Warm the build cache" warm_cache
