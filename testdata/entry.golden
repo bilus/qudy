@@ -16,6 +16,18 @@ func (g *liveGenerator) generateDispatchEntry(name string, steps []navStep, recv
 		}
 		return gensym
 	}()
+	qudyName := func() func(string, func(string) string) string {
+		names := map[string]string{}
+		name := func(want string, gensym func(string) string) string {
+			found, ok := names[want]
+			if !ok {
+				found = gensym(want)
+				names[want] = found
+			}
+			return found
+		}
+		return name
+	}()
 //line entry.go:6
 	params := valueParams(h.sig)
 	event := "_"
@@ -30,7 +42,7 @@ func (g *liveGenerator) generateDispatchEntry(name string, steps []navStep, recv
 	for _, p := range params {
 		local := qudyGensym(p.Name)
 		locals = append(locals, local)
-		errName_qd := qudyGensym("errName")
+		errName_qd := qudyName("errName", qudyGensym)
 //line entry.go:16
 		g.generate(`%v, %v := live.Param[%v](%v, %v)
 if %v != nil {
@@ -57,8 +69,8 @@ if %v != nil {
 		callee = h.field + "." + h.method
 	}
 	if fill != "" {
-		decodeErr_qd := qudyGensym("decodeErr")
-		ruleErr_qd := qudyGensym("ruleErr")
+		decodeErr_qd := qudyName("decodeErr", qudyGensym)
+		ruleErr_qd := qudyName("ruleErr", qudyGensym)
 //line entry.go:33
 		g.generate(`if %v := form.Decode(&%v.%v, %v); %v != nil {
 	return %v

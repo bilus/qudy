@@ -105,29 +105,39 @@ func TestCompileWritesTheEmitCalls(t *testing.T) {
 			"func f() {\n\tqudyGensym := func() func(string) string {",
 		},
 		{
+			"a function body with a gensym declares the names of its scope",
+			template("//`a := errName#"),
+			"qudyName := func() func(string, func(string) string) string {",
+		},
+		{
+			"a function body with a gensym and a scope call declares a scope function for its names",
+			template("defer qudyScope()()", "//`a := errName#"),
+			"qudyName, qudyScope := func(scope func() func()) (func(string, func(string) string) string, func() func()) {",
+		},
+		{
 			"a template without a gensym declares no symbol generator",
 			template("//`a := 1"),
 			"func f() {\n\tg.generate",
 		},
 		{
-			"the compiler declares a gensym before its run",
+			"the compiler looks a gensym up before its run",
 			template("//`~x := errName#"),
-			"errName_qd := qudyGensym(\"errName\")\n\tg.generate(`%v := %v\n`, x, errName_qd)",
+			"errName_qd := qudyName(\"errName\", qudyGensym)\n\tg.generate(`%v := %v\n`, x, errName_qd)",
 		},
 		{
-			"a second run in the same block reuses the gensym",
+			"a second run in the same block looks the gensym up again",
 			template("//`a := errName#", "x := 1", "//`b := errName#"),
-			"errName_qd := qudyGensym(\"errName\")\n\tg.generate(`a := %v\n`, errName_qd)\n\tx := 1\n\tg.generate(`b := %v\n`, errName_qd)",
+			"errName_qd := qudyName(\"errName\", qudyGensym)\n\tg.generate(`a := %v\n`, errName_qd)\n\tx := 1\n\terrName_qd = qudyName(\"errName\", qudyGensym)\n\tg.generate(`b := %v\n`, errName_qd)",
 		},
 		{
-			"a run in a loop declares the gensym inside the loop",
+			"a run in a loop looks the gensym up in every iteration",
 			template("for range xs {", "//`a := errName#", "}"),
-			"for range xs {\n\t\terrName_qd := qudyGensym(\"errName\")\n\t\tg.generate(`a := %v\n`, errName_qd)\n\t}",
+			"for range xs {\n\t\terrName_qd := qudyName(\"errName\", qudyGensym)\n\t\tg.generate(`a := %v\n`, errName_qd)\n\t}",
 		},
 		{
-			"a sibling block declares its own gensym",
+			"a sibling block looks up the same gensym",
 			template("if x {", "//`a := errName#", "}", "if y {", "//`b := errName#", "}"),
-			"if y {\n\t\terrName_qd := qudyGensym(\"errName\")\n\t\tg.generate(`b := %v\n`, errName_qd)\n\t}",
+			"if y {\n\t\terrName_qd := qudyName(\"errName\", qudyGensym)\n\t\tg.generate(`b := %v\n`, errName_qd)\n\t}",
 		},
 		{
 			"a line inside a block comment is not an output line",
@@ -143,14 +153,15 @@ func TestCompileWritesTheEmitCalls(t *testing.T) {
 	}
 }
 
-// twelve writes twelve gensyms, enough for two digits, and interpolates an int.
+// twelve asks for twelve gensyms, enough for two digits, and interpolates an int.
 const twelve = `package main
 
 import "fmt"
 
 func main() {
 	for i := range 12 {
-		//` + "`" + `e# := ~i
+		e := qudyGensym("e")
+		//` + "`" + `~e := ~i
 	}
 }
 `
@@ -284,7 +295,7 @@ func TestCompileUsesTheSymbolGeneratorOfTheTemplate(t *testing.T) {
 			if strings.Contains(gen, builtin) {
 				t.Errorf("the compiler declared its own symbol generator:\n%s", gen)
 			}
-			if want := `errName_qd := qudyGensym("errName")`; !strings.Contains(gen, want) {
+			if want := `errName_qd := qudyName("errName", qudyGensym)`; !strings.Contains(gen, want) {
 				t.Errorf("compiled to\n%s\nwant it to hold\n%s", gen, want)
 			}
 		})
@@ -348,7 +359,7 @@ func TestCompileKeepsAGensymApartFromTheNamesOfTheTemplate(t *testing.T) {
 	} {
 		t.Run(c.description, func(t *testing.T) {
 			gen := compile(t, c.template)
-			for _, want := range []string{`err_qd := qudyGensym("err")`, "g.generate(`x := %v\n`, err_qd)"} {
+			for _, want := range []string{`err_qd := qudyName("err", qudyGensym)`, "g.generate(`x := %v\n`, err_qd)"} {
 				if !strings.Contains(gen, want) {
 					t.Errorf("compiled to\n%s\nwant it to hold\n%s", gen, want)
 				}
@@ -357,25 +368,29 @@ func TestCompileKeepsAGensymApartFromTheNamesOfTheTemplate(t *testing.T) {
 	}
 }
 
-func TestCompileDeclaresAGensymInBracesOncePerBlock(t *testing.T) {
+func TestCompileLooksAGensymInBracesUpBeforeEveryRun(t *testing.T) {
 	type testCase struct {
 		description  string
 		lines        []string
 		declarations int
+		lookups      int
 	}
 	for _, c := range []testCase{
-		{"in braces alone", []string{"//`use(~{wrap(value#)})"}, 1},
-		{"outside braces first, in one run", []string{"//`value# := 1", "//`use(~{wrap(value#)})"}, 1},
-		{"in braces first, in one run", []string{"//`use(~{wrap(value#)})", "//`value# := 1"}, 1},
-		{"in two runs of one block", []string{"//`value# := 1", "n := 1", "_ = n", "//`use(~{wrap(value#)})"}, 1},
-		{"in a block and a block inside it", []string{"//`value# := 1", "if true {", "//`use(~{wrap(value#)})", "}"}, 1},
-		{"in two blocks side by side", []string{"if true {", "//`value# := 1", "}", "if true {", "//`use(~{wrap(value#)})", "}"}, 2},
+		{"in braces alone", []string{"//`use(~{wrap(value#)})"}, 1, 1},
+		{"outside braces first, in one run", []string{"//`value# := 1", "//`use(~{wrap(value#)})"}, 1, 1},
+		{"in braces first, in one run", []string{"//`use(~{wrap(value#)})", "//`value# := 1"}, 1, 1},
+		{"in two runs of one block", []string{"//`value# := 1", "n := 1", "_ = n", "//`use(~{wrap(value#)})"}, 1, 2},
+		{"in a block and a block inside it", []string{"//`value# := 1", "if true {", "//`use(~{wrap(value#)})", "}"}, 1, 2},
+		{"in two blocks side by side", []string{"if true {", "//`value# := 1", "}", "if true {", "//`use(~{wrap(value#)})", "}"}, 2, 2},
 	} {
 		t.Run(c.description, func(t *testing.T) {
 			gen := compile(t, template(c.lines...))
-			declaration := `value_qd := qudyGensym("value")`
+			declaration := `value_qd := qudyName("value", qudyGensym)`
 			if got := strings.Count(gen, declaration); got != c.declarations {
 				t.Errorf("the generator declares the gensym %d times, want %d:\n%s", got, c.declarations, gen)
+			}
+			if got := strings.Count(gen, `qudyName("value", qudyGensym)`); got != c.lookups {
+				t.Errorf("the generator looks the gensym up %d times, want %d:\n%s", got, c.lookups, gen)
 			}
 			if declared, used := strings.Index(gen, declaration), strings.Index(gen, "wrap(value_qd)"); used < declared {
 				t.Errorf("the generator uses the gensym without a declaration above the use:\n%s", gen)
@@ -424,10 +439,10 @@ func TestAGensymInBracesIsTheNameOutsideThem(t *testing.T) {
 	}
 	want := "value_qd1, err_qd2 := read(0)\n" +
 		"set(0, wrap(value_qd1), value_qd1+err_qd2)\n" +
-		"value_qd3, err_qd4 := read(1)\n" +
-		"set(1, wrap(value_qd3), value_qd3+err_qd4)\n" +
-		"use(wrap(late_qd5), wrap(late#))\n" +
-		"late_qd5 := 7\n"
+		"value_qd1, err_qd2 := read(1)\n" +
+		"set(1, wrap(value_qd1), value_qd1+err_qd2)\n" +
+		"use(wrap(late_qd3), wrap(late#))\n" +
+		"late_qd3 := 7\n"
 	if string(out) != want {
 		t.Errorf("the generator wrote\n%s\nwant\n%s", out, want)
 	}

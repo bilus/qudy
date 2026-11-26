@@ -211,7 +211,7 @@ func TestCompileWithRuntimeLeavesTheSymbolGeneratorToTheRuntimeFile(t *testing.T
 	}
 	for _, want := range []string{
 		"qudyOut := qudyDispatch(func(format string, args ...any) { g.generate(format, args...) })",
-		`errName_qd := qudyGensym("errName")`,
+		`errName_qd := qudyName("errName", qudyGensym)`,
 		"qudyOut(`a := %v\n`, errName_qd)",
 	} {
 		if !strings.Contains(string(gen), want) {

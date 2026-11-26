@@ -17,6 +17,19 @@ package %v
 
 // writeSum writes the declarations of one sum type.
 func (g *writer) writeSum(sum sumType) {
+	qudyName := func() func(string, func(string) string) string {
+		names := map[string]string{}
+		name := func(want string, gensym func(string) string) string {
+			found, ok := names[want]
+			if !ok {
+				found = gensym(want)
+				names[want] = found
+			}
+			return found
+		}
+		return name
+	}()
+//line write.go:14
 	qudyGensym := newSymbolGenerator(sum.variants).gensym
 	iface, marker := sum.variantInterface(), sum.markerMethod()
 //line write.go:16
@@ -32,8 +45,8 @@ type %v interface{ %v() }
 `, v, marker)
 //line write.go:22
 	}
-	s_qd := qudyGensym("s")
-	R_qd := qudyGensym("R")
+	s_qd := qudyName("s", qudyGensym)
+	R_qd := qudyName("R", qudyGensym)
 //line write.go:23
 	g.generate(`
 // %v is one of its variants, and %v when it is the zero value.
@@ -53,11 +66,14 @@ func (%v %v) Match[%v any](
 `, /*line write.go:24*/ sum.name, sum.defaultVariant /*line write.go:25*/, sum.name, iface /*line write.go:27*/, sum.constraint(), sum.name /*line write.go:28*/, sum.constraint() /*line write.go:29*/, sum.union() /*line write.go:30*/, iface /*line write.go:33*/, sum.constructor(), sum.name /*line write.go:34*/, sum.constructor(), sum.constraint(), sum.name, sum.name /*line write.go:36*/, sum.name /*line write.go:37*/, s_qd, sum.name, R_qd)
 //line write.go:38
 	for _, v := range sum.variants {
+		R_qd = qudyName("R", qudyGensym)
 //line write.go:38
 		g.generate(`	%v func(%v) %v,
 `, branch(v), v, R_qd)
 //line write.go:40
 	}
+	R_qd = qudyName("R", qudyGensym)
+	s_qd = qudyName("s", qudyGensym)
 //line write.go:41
 	g.generate(`) %v {
 	switch v := %v.v.(type) {

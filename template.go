@@ -22,6 +22,7 @@ type template struct {
 	importsFmt    bool
 	declared      map[string]bool
 	ownGensym     map[span]bool
+	localScope    map[span]bool
 	gensymCalls   []int
 	scopeCalls    []int
 	packageGensym bool
@@ -45,6 +46,7 @@ func newTemplate(filename string, src []byte) (*template, error) {
 		importsFmt:    importsPackage(file, "fmt"),
 		declared:      declaredNames(file),
 		ownGensym:     ownGensymBodies(fset, file),
+		localScope:    localScopeBodies(fset, file),
 		gensymCalls:   callLines(fset, file, gensymVariable),
 		scopeCalls:    callLines(fset, file, scopeVariable),
 		packageGensym: declaresInPackage(file, gensymVariable),
@@ -251,6 +253,26 @@ func ownGensymBodies(fset *token.FileSet, file *ast.File) map[span]bool {
 		return true
 	})
 	return own
+}
+
+// localScopeBodies returns the function bodies that declare qudyScope as a local.
+func localScopeBodies(fset *token.FileSet, file *ast.File) map[span]bool {
+	local := map[span]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		var typ *ast.FuncType
+		var body *ast.BlockStmt
+		switch n := n.(type) {
+		case *ast.FuncDecl:
+			typ, body = n.Type, n.Body
+		case *ast.FuncLit:
+			typ, body = n.Type, n.Body
+		}
+		if body != nil && !hasParam(typ, scopeVariable) && declaresInFunc(typ, body, scopeVariable) {
+			local[span{fset.Position(body.Lbrace).Line, fset.Position(body.Rbrace).Line}] = true
+		}
+		return true
+	})
+	return local
 }
 
 // declaresInPackage reports whether the package declares a function or a variable with a name.

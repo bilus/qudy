@@ -56,6 +56,15 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 			}
 		}
 	}
+	names := t.nameBodies()
+	scoped := t.scopeCallBodies()
+	for _, line := range t.scopeCalls {
+		// The scope function of the names takes the place of a parameter or a
+		// package-level function, and a local of the body is declared too late.
+		if body := t.outerFuncBodyOf(line); names[body.from] && t.localScope[body] {
+			return nil, fmt.Errorf("%s:%d: a gensym in a function that declares %s as a local is not supported", filename, line, scopeVariable)
+		}
+	}
 	outputs := t.outputBodies()
 	// synced holds while the copied template lines keep their own line numbers.
 	synced := false
@@ -82,12 +91,19 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 		if err != nil {
 			return fmt.Errorf("%s:%d: %w", filename, runAt, err)
 		}
+		looked := map[string]bool{}
 		for _, name := range gensyms {
-			if in, ok := declaredIn[name]; ok && in.from <= runAt && runAt <= in.to {
+			if looked[name] {
 				continue
 			}
-			insert(gensymName(name) + " := " + gensymVariable + "(" + strconv.Quote(name) + ")")
-			declaredIn[name] = t.blockOf(runAt)
+			looked[name] = true
+			// Every run looks the name up, because a scope may start or end between two runs.
+			assign := " = "
+			if in, ok := declaredIn[name]; !ok || runAt < in.from || in.to < runAt {
+				assign = " := "
+				declaredIn[name] = t.blockOf(runAt)
+			}
+			insert(gensymName(name) + assign + nameLookup(name))
 		}
 		for _, s := range statements {
 			insert(lineDirective(filename, s.line), s.text)
@@ -128,6 +144,13 @@ func (t *template) compile(emit string, runtime bool) ([]byte, error) {
 				insert(gensymDecl)
 			}
 		}
+		if names[i+1] {
+			if scoped[i+1] {
+				insert(nameScopeDecl)
+			} else {
+				insert(nameDecl)
+			}
+		}
 		if outputs[i+1] && runtime {
 			insert(outDecl(emit))
 		}
@@ -163,23 +186,44 @@ func (t *template) gensymBodies() map[int]bool {
 	for _, line := range t.gensymCalls {
 		need(line)
 	}
-	for line, text := range t.outputLines {
-		// The line's run reports the error.
-		scanned, err := scanOutputLine(text)
-		if err != nil || len(scanned.gensyms) == 0 {
-			continue
-		}
+	for _, line := range t.gensymLines() {
 		need(line)
 	}
 	return bodies
 }
 
+// nameBodies returns the opening lines of function bodies with a gensym in an output line.
+func (t *template) nameBodies() map[int]bool {
+	bodies := map[int]bool{}
+	for _, line := range t.gensymLines() {
+		bodies[t.outerFuncBodyOf(line).from] = true
+	}
+	return bodies
+}
+
+// gensymLines returns the numbers of the output lines with a gensym.
+func (t *template) gensymLines() []int {
+	var lines []int
+	for line, text := range t.outputLines {
+		// The line's run reports the error.
+		if scanned, err := scanOutputLine(text); err == nil && len(scanned.gensyms) > 0 {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 // scopeBodies returns the opening lines of function bodies that call qudyScope without declaring it.
 func (t *template) scopeBodies() map[int]bool {
-	bodies := map[int]bool{}
 	if t.declared[scopeVariable] {
-		return bodies
+		return map[int]bool{}
 	}
+	return t.scopeCallBodies()
+}
+
+// scopeCallBodies returns the opening lines of function bodies that call qudyScope.
+func (t *template) scopeCallBodies() map[int]bool {
+	bodies := map[int]bool{}
 	for _, line := range t.scopeCalls {
 		bodies[t.outerFuncBodyOf(line).from] = true
 	}

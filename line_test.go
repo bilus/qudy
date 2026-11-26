@@ -46,7 +46,7 @@ func TestCompileWritesLineDirectives(t *testing.T) {
 		{"a single output line, so that its arguments map to it", "//line t.go:6\n\t\tg.generate(`x := %v\n`, i)"},
 		{"the line after a run", "//line t.go:8\n\t}"},
 		{"a run of several lines, by its first line", "//line t.go:9\n\tg.generate(`a %v\nb\nc %v %v\nd`, /*line t.go:9*/ p /*line t.go:11*/, q, r)"},
-		{"the line after a gensym declaration", "err_qd := qudyGensym(\"err\")\n//line t.go:14\n\tg.generate(`e %v\n`, err_qd)"},
+		{"the line after a gensym declaration", "err_qd := qudyName(\"err\", qudyGensym)\n//line t.go:14\n\tg.generate(`e %v\n`, err_qd)"},
 		{"the closing brace", "//line t.go:16\n}"},
 	} {
 		t.Run(c.description, func(t *testing.T) {
