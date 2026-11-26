@@ -404,9 +404,10 @@ A generator often needs its own local names in the code it produces. Write
 //`}
 ```
 
-The first use of `errName#` in a block declares a variable in the generator,
-equivalent to `errName_qd := qudyGensym("errName")`. Later uses in that block insert
-the same name.
+All three uses of `errName#` insert one name, such as `errName_qd1`. `name#`
+inserts the same name in every block of a template function, as long as the
+uses share one [scope](#scopes). One call of a template function is one scope,
+so the next call of the function gets a new name.
 
 `errName#` never collides with a variable of the template. qudy keeps the
 gensym in a generator variable of its own, `errName_qd`, so `errName#` and
@@ -429,8 +430,8 @@ value_qd1, err_qd2 := parse(input)
 tree.Set(0, box(value_qd1))
 ```
 
-qudy reads `value#` in the braces as the variable `value_qd`, and the block's
-rule above decides where the generator declares it. A `#` inside a string
+qudy reads `value#` in the braces as the generator variable `value_qd`, which
+holds the name of `value#` in the current scope. A `#` inside a string
 literal, a rune literal or a comment of the expression stays as written.
 
 `name#` belongs in output lines. When the template's Go code needs the gensym,
@@ -442,10 +443,34 @@ the generator stays one self-contained file. Each generated symbol gets a
 numbered suffix, so `errName#` comes out as `errName_qd1`, which is unlikely to
 collide with a name in your code.
 
-The numbers follow the order of generation, so a new gensym renumbers the ones
-after it, which shows up as churn in generated code under version control. To
-confine that, tell qudy where a scope of the generated program starts. The
-numbering restarts in a scope, and the call that `qudyScope` returns ends it:
+### Scopes
+
+A scope decides which uses of `name#` share a name. The blocks of the template
+do not decide it. One branch can therefore assign a name, and a later branch
+or a later line can read the same name:
+
+```go
+if single {
+    //`value# := ~expr
+} else {
+    //`value#, err# := ~expr
+    //`check(err#)
+}
+//`~tree.Set(~i, value#)
+```
+
+A loop body is no scope either. A name can be set before a loop, used in the
+loop, and read after it. For the same reason every iteration of this loop
+writes the same name, `v_qd1`:
+
+```go
+for _, field := range fields {
+    //`v# := ~field
+}
+```
+
+`qudyScope()` starts a scope of the generated program and returns a function,
+and a call of that function ends the scope:
 
 ```go
 func writeStringer(typ string, names []string) {
@@ -455,11 +480,47 @@ func writeStringer(typ string, names []string) {
 }
 ```
 
-Each generated function then numbers from one, and a gensym added in one of
-them cannot renumber another. A loop that writes several functions ends the
-scope at the end of each iteration, with `end()` in place of the `defer`. Scopes
-nest: a scope inside another continues the numbering and restores it when it
-ends, so a name from an enclosing scope is never reused while it is live.
+A new scope starts with no names, so `name#` inside it is a new name. After the
+scope's end, `name#` is the name of the enclosing scope again.
+
+A scope also confines the numbering. The numbers follow the order of
+generation, so a new gensym renumbers the ones after it, which shows up as
+churn in generated code under version control. A scope continues the numbering
+of the scope around it, and its end restores the count. A name from an
+enclosing scope is therefore never reused while it is live, and a gensym added
+in one scope cannot renumber the scopes after it.
+
+> **Tip:** call `qudyScope` wherever the generated program starts a function or
+> a block with new variables. A loop that writes one function per iteration
+> starts a scope in each iteration, and ends it with `end()` in place of the
+> `defer`:
+>
+> ```go
+> for _, typ := range types {
+>     end := qudyScope()
+>     //`func (v# ~typ) String() string {
+>     ...
+>     end()
+> }
+> ```
+>
+> Every iteration then writes `v_qd1`, because the end of each scope restores
+> the count. Equal names suit separate functions. They fail when all
+> iterations write into one generated block: `v_qd1 := 0` followed by
+> `v_qd1 := 1` is a redeclaration in Go. For a new name in each iteration of
+> such a loop, start no scope in the loop and call `qudyGensym` there:
+>
+> ```go
+> for _, field := range fields {
+>     v := qudyGensym("v")
+>     //`~v := ~field
+> }
+> ```
+>
+> This loop writes `v_qd1`, `v_qd2`, and so on. A template function called in
+> each iteration is a scope of its own, but its names differ between calls only
+> with the [runtime file](#one-symbol-generator-for-the-package). Without that
+> file every call counts from one.
 
 The default generator does not inspect the output's scope or reserve existing
 identifiers. A user-defined `errName_qd1` can still collide with its result.
@@ -474,7 +535,12 @@ variable, a parameter, or a package-level variable. It is a
 qudyGensym := newSeededGensym(taken)
 ```
 
-A function literal shares the symbol generator of the function around it.
+A function literal shares the symbol generator and the scope of the function
+around it.
+
+A template may also declare `qudyScope`, a `func() func()`, at package level or
+as a parameter. A function that uses `name#` cannot declare `qudyScope` as a
+local variable; qudy rejects that template.
 
 Call `qudyGensym(want)` directly inside a function body when you compute the
 desired name or need to declare the variable yourself:
@@ -538,6 +604,11 @@ may also stand outside a function body.
 on from the caller's count, and the scope's end restores the count for the
 whole package. Without the runtime, a scope reaches only the function that
 opens it, because every function has a symbol generator of its own.
+
+The names of `name#` stay with one call of one function in both cases. A helper
+called inside a scope has names of its own, so `err#` in the helper and `err#`
+in its caller are two names. A `qudyScope` call starts new names only in the
+function that holds the call.
 
 One limit remains. A gensym can still collide with a name of your own in the
 output, such as a hand-written `err_qd1`.
