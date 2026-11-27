@@ -57,7 +57,7 @@ func lines(p Program) (n int) {
 
 // Every generated program type-checks, and its labels are consistent.
 func TestProgramsTypeCheck(t *testing.T) {
-	for name, cfg := range map[string]Config{"default": Default, "pure": Pure} {
+	for name, cfg := range map[string]Config{"default": Default, "pure": Pure, "core": Core, "core pure": CorePure} {
 		t.Run(name, func(t *testing.T) {
 			rapid.Check(t, func(t *rapid.T) {
 				p := Generate(t, cfg)

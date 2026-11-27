@@ -26,13 +26,36 @@ type Config struct {
 	Impurities int
 	// Module is the module path of the program; "" is example.com/generated.
 	Module string
+	// Constructs selects the optional constructs of the comptime fragment.
+	Constructs Constructs
 }
 
+// Constructs selects the optional constructs of the comptime fragment. Without
+// any, the fragment is its core: arithmetic on int64, bool and string, local
+// variables, control flow, structs, pointers, slices and maps the function
+// created, static calls, methods, recursion and panics.
+type Constructs struct {
+	FuncValues bool // function literals, function and method values, and variables of a function type
+	Generics   bool // generic functions and their calls; needs FuncValues
+	Interfaces bool // interface types, the methods that implement them, and calls through them
+	Append     bool // append to a slice the function created and that has no alias
+	Trusted    bool // calls of the trusted symbols of the index
+}
+
+// Everything selects every optional construct.
+var Everything = Constructs{FuncValues: true, Generics: true, Interfaces: true, Append: true, Trusted: true}
+
 // Default generates programs of a few hundred lines with up to three impurities.
-var Default = Config{Rounds: 6, Packages: 3, Impurities: 3}
+var Default = Config{Rounds: 6, Packages: 3, Impurities: 3, Constructs: Everything}
 
 // Pure generates programs of the same size in which every function is Comptime.
-var Pure = Config{Rounds: 6, Packages: 3}
+var Pure = Config{Rounds: 6, Packages: 3, Constructs: Everything}
+
+// Core generates programs from the core of the fragment, with up to three impurities.
+var Core = Config{Rounds: 6, Packages: 3, Impurities: 3}
+
+// CorePure generates programs from the core of the fragment in which every function is Comptime.
+var CorePure = Config{Rounds: 6, Packages: 3}
 
 // Limits that keep a generated program small and quick to run.
 const (
@@ -228,7 +251,7 @@ func (m *machine) DeclareStruct(t *rapid.T) {
 
 // DeclareInterface declares an interface type with one method, a func(int64) int64.
 func (m *machine) DeclareInterface(t *rapid.T) {
-	need(t, m.fn == nil && len(m.pkg().types) < 6)
+	need(t, m.fn == nil && len(m.pkg().types) < 6 && m.cfg.Constructs.Interfaces)
 	d := &typeDecl{pkg: m.pkg(), name: fmt.Sprintf("I%d", m.next()), method: fmt.Sprintf("M%d", m.next())}
 	d.typ = &typ{kind: kIface, decl: d}
 	m.pkg().types = append(m.pkg().types, d)
@@ -262,8 +285,10 @@ func (m *machine) anyType(t *rapid.T) *typ {
 		return structs[pick(t, len(structs), "struct")].ptr
 	case c == 8 && len(ifaces) > 0:
 		return ifaces[pick(t, len(ifaces), "interface")].typ
+	case c == 9 && m.cfg.Constructs.FuncValues:
+		return tFunc
 	default:
-		return []*typ{tInt, tBool, tString, tInts, tStrings, tMap, tInt, tString, tInt, tFunc}[c]
+		return []*typ{tInt, tBool, tString, tInts, tStrings, tMap, tInt, tString, tInt, tInt}[c]
 	}
 }
 
@@ -355,7 +380,7 @@ func (m *machine) OpenMethod(t *rapid.T) {
 
 // OpenGeneric opens a function with a type parameter T, a value of T and a func(T) int64.
 func (m *machine) OpenGeneric(t *rapid.T) {
-	need(t, m.fn == nil)
+	need(t, m.fn == nil && m.cfg.Constructs.Generics && m.cfg.Constructs.FuncValues)
 	f := m.begin(t, "generic")
 	m.param(tParam)
 	m.param(tPick)
@@ -419,7 +444,11 @@ func (m *machine) openImpure(t *rapid.T) {
 	}
 	m.params(t)
 	// A bool has too few values to show every impurity, so the result is an int64 or a string.
-	f.result = []*typ{tInt, tString}[pick(t, 2, "result")]
+	// Mixing the impure value into a string takes strconv.FormatInt, a trusted symbol.
+	f.result = tInt
+	if m.cfg.Constructs.Trusted {
+		f.result = []*typ{tInt, tString}[pick(t, 2, "result")]
+	}
 	m.plant(t)
 }
 
@@ -607,7 +636,7 @@ func (m *machine) Store(t *rapid.T) {
 
 // Append appends to a slice that the function created and that has no alias.
 func (m *machine) Append(t *rapid.T) {
-	need(t, m.inFunc())
+	need(t, m.inFunc() && m.cfg.Constructs.Append)
 	targets := m.find(func(v variable) bool { return v.typ.kind == kSlice && v.owned && v.unique })
 	need(t, len(targets) > 0)
 	m.risky = false

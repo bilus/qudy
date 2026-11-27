@@ -35,6 +35,13 @@ every `Comptime` one. `Unknown` functions take no part in either assertion.
 A `Comptime` function may panic. It then panics with the same value on every
 call, because a statement holds at most one operation that can panic.
 
+## Configurations
+
+`gen.Default` and `gen.Pure` use every construct of the fragment, with and
+without impurities. `gen.Core` and `gen.CorePure` leave out function values,
+generic functions, interfaces, `append` and the trusted symbols. An analyzer
+with a small rule set should list every `Comptime` function of a core program.
+
 ## Trusted symbols
 
 `gen.Index()` lists the functions of the standard library that the generator

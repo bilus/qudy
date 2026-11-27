@@ -30,3 +30,9 @@ such as `int-size`: it holds when host and target agree on the size of `int`.
 `TestGeneratedPrograms` checks the analyzer against the generator: no function
 with a planted impurity may be listed, and the log says how many of the
 functions that are comptime by construction are.
+
+`TestCorePrograms` does the same with core programs, which use only constructs
+that the first rules cover, and requires that every comptime function is listed.
+
+`TestDisabledRules` shows that these tests can fail. It disables one rule at a
+time and requires that a function with a planted impurity is then listed.

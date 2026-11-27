@@ -21,7 +21,8 @@ var excused = map[string]comptime.Condition{
 }
 
 // generate writes n programs into one module below a new directory, and returns them.
-func generate(t *testing.T, n int) (dir string, programs []gen.Program) {
+// Two of every three have impurities, and one has none.
+func generate(t *testing.T, n int, impure, pure gen.Config) (dir string, programs []gen.Program) {
 	t.Helper()
 	dir = t.TempDir()
 	write := func(name, src string) {
@@ -35,9 +36,9 @@ func generate(t *testing.T, n int) (dir string, programs []gen.Program) {
 	}
 	write("go.mod", "module example.com/generated\n\ngo 1.25\n")
 	for seed := range n {
-		cfg := gen.Default
+		cfg := impure
 		if seed%3 == 2 {
-			cfg = gen.Pure
+			cfg = pure
 		}
 		cfg.Module = fmt.Sprintf("example.com/generated/prog%d", seed)
 		p := gen.Example(seed, cfg)
@@ -119,7 +120,7 @@ func TestGeneratedPrograms(t *testing.T) {
 	if testing.Short() {
 		t.Skip("analyzes generated programs and the packages they import")
 	}
-	dir, programs := generate(t, 150)
+	dir, programs := generate(t, 150, gen.Default, gen.Pure)
 	o := compare(t, dir, programs, comptime.FirstRules{})
 	for _, w := range o.wrong {
 		t.Error(w)
@@ -139,6 +140,31 @@ func TestGeneratedPrograms(t *testing.T) {
 		t.Errorf("the programs hold %d impure and %d comptime functions, want many of each", o.impure, o.comptime)
 	}
 }
+
+// The first rules cover the core of the generator's fragment: every function that is
+// comptime by construction is listed, unless it holds a construct on the list below.
+func TestCorePrograms(t *testing.T) {
+	if testing.Short() {
+		t.Skip("analyzes generated programs and the packages they import")
+	}
+	dir, programs := generate(t, 150, gen.Core, gen.CorePure)
+	o := compare(t, dir, programs, comptime.FirstRules{})
+	for _, w := range o.wrong {
+		t.Error(w)
+	}
+	t.Logf("functions with a planted impurity: %d, of which %d are listed", o.impure, len(o.wrong))
+	t.Logf("functions that are comptime by construction: %d listed of %d", o.listed, o.comptime)
+	t.Logf("why a comptime function was not listed:\n%s", counts(o.misses))
+	for miss, n := range o.misses {
+		if !knownGaps[miss] {
+			t.Errorf("%d comptime functions were not listed for a reason that is not a known gap: %s", n, miss)
+		}
+	}
+}
+
+// knownGaps are the constructs of the core fragment that the first rules reject.
+// Each is comptime in the generated programs, and none is proven so by a rule yet.
+var knownGaps = map[string]bool{}
 
 // without is the first rule set with one rule disabled: a rejection whose chain ends in
 // the reason kind counts as comptime.
@@ -173,21 +199,35 @@ func (w without) Func(f *comptime.Function, look comptime.Lookup) comptime.Verdi
 	return w.pass(w.FirstRules.Func(f, look))
 }
 
-// The test above can fail: with one of these rules disabled, it lists a function with a
-// planted impurity. The log names the rules that no generated program tests this way.
-// A function is often rejected for a second reason too, which hides the disabled one.
+// tested are the rules whose removal must list a function with a planted impurity.
+// The generator plants few or no impurities that only one of the other rules catches.
+var tested = map[comptime.ReasonKind]bool{
+	comptime.ReasonVariable:     true,
+	comptime.ReasonNoBody:       true,
+	comptime.ReasonDynamicCall:  true,
+	comptime.ReasonFuncValue:    true,
+	comptime.ReasonForeignWrite: true,
+	comptime.ReasonConcurrency:  true,
+	comptime.ReasonMapRange:     true,
+	comptime.ReasonFloat:        true,
+	comptime.ReasonUnspecified:  true,
+}
+
+// The tests above can fail: with one of the tested rules disabled, the analyzer lists a
+// function with a planted impurity. The programs are core programs, because in the
+// others a call of a trusted symbol, which the first rules reject, hides the disabled rule.
 func TestDisabledRules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("analyzes generated programs once for every reason kind")
 	}
-	dir, programs := generate(t, 60)
+	dir, programs := generate(t, 120, gen.Core, gen.CorePure)
 	var untested []string
 	for _, kind := range comptime.ReasonKinds() {
 		wrong := len(compare(t, dir, programs, without{kind: kind}).wrong)
 		switch {
 		case wrong > 0:
-			t.Logf("without %-20q %d functions with a planted impurity are listed", kind, wrong)
-		case kind == comptime.ReasonVariable || kind == comptime.ReasonFuncValue:
+			t.Logf("without %-22q %d functions with a planted impurity are listed", kind, wrong)
+		case tested[kind]:
 			t.Errorf("without the rule %q no function with a planted impurity is listed", kind)
 		default:
 			untested = append(untested, string(kind))

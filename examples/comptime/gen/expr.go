@@ -349,6 +349,9 @@ func (m *machine) fields(want *typ, add func(func() string)) {
 
 // externals adds the calls of trusted symbols that return the type.
 func (m *machine) externals(t *rapid.T, want *typ, depth int, add func(func() string)) {
+	if !m.cfg.Constructs.Trusted {
+		return
+	}
 	ints := m.find(func(v variable) bool { return v.typ == tInt })
 	for _, e := range index {
 		if e.result != want || e.nonconst && len(ints) == 0 {

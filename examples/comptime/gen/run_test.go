@@ -197,8 +197,9 @@ func TestLabelsHoldAtRunTime(t *testing.T) {
 	}
 	for seed := range n / 2 {
 		check(seed, Pure)
+		check(seed, Core)
 	}
-	t.Logf("%d programs with impurities, %d without", n, n/2)
+	t.Logf("%d programs with impurities, %d without, %d from the core of the fragment", n, n/2, n/2)
 	t.Logf("comptime functions with one result under all five conditions: %d of %d, and %d of %d in programs without impurities", comptime.ok, comptime.total, pure.ok, pure.total)
 	t.Logf("comptime functions whose call panicked, with the same value each time: %d", panicked.total)
 	var names []string
