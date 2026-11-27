@@ -24,6 +24,8 @@ type Config struct {
 	// Impurities is the largest number of planted impurities. With zero, every
 	// function is Comptime; otherwise at least one function is Impure.
 	Impurities int
+	// Module is the module path of the program; "" is example.com/generated.
+	Module string
 }
 
 // Default generates programs of a few hundred lines with up to three impurities.
@@ -88,7 +90,10 @@ func Generate(t *rapid.T, cfg Config) Program {
 
 // newMachine returns a machine with one empty package.
 func newMachine(cfg Config) *machine {
-	m := &machine{cfg: cfg, module: "example.com/generated", only: -1}
+	m := &machine{cfg: cfg, module: cfg.Module, only: -1}
+	if m.module == "" {
+		m.module = "example.com/generated"
+	}
 	m.openPackage()
 	return m
 }
