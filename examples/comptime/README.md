@@ -21,6 +21,7 @@ such as `int-size`: it holds when host and target agree on the size of `int`.
 - `first.go`, `first_body.go`: `FirstRules`, the provisional first rule set.
 - `verdict.go`, `output.go`: verdicts, reasons, conditions, text and JSON.
 - `gen/`: a generator of test programs with labelled functions; see its README.
+- `spec/`: the approved requirements and the vocabulary; see its README.
 
 ## Tests
 
